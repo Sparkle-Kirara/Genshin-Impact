@@ -1,0 +1,308 @@
+body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            background-color: #cbd5e1;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        /* Paimon-inspired Custom CSS Styles */
+        .menu-grid-btn {
+            background-color: rgba(18, 16, 28, 0.78);
+            border: 1px solid rgba(75, 68, 115, 0.5);
+            border-radius: 12px;
+            aspect-ratio: 1 / 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #d1d5db;
+            cursor: pointer;
+            transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+        }
+        .menu-grid-btn:hover {
+            background-color: rgba(45, 40, 71, 0.9);
+            border-color: rgba(220, 185, 125, 0.75);
+            color: #fff;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.5), 0 0 10px rgba(220, 185, 125, 0.15);
+        }
+        .menu-grid-btn:active {
+            transform: translateY(0) scale(0.96);
+        }
+        .menu-notif-dot {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            width: 8px;
+            height: 8px;
+            background-color: #ef4444;
+            border-radius: 50%;
+            box-shadow: 0 0 6px #ef4444;
+        }
+        .rpg-back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #dcb97d;
+            background-color: rgba(53, 47, 85, 0.4);
+            border: 1px solid rgba(220, 185, 125, 0.25);
+            padding: 6px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.18s ease;
+            align-self: flex-start;
+            margin-bottom: 12px;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .rpg-back-btn:hover {
+            background-color: rgba(220, 185, 125, 0.12);
+            border-color: rgba(220, 185, 125, 0.6);
+            color: #fff;
+        }
+        /* Hiệu ứng phản hồi xúc giác nhẹ khi chạm/click */
+        .rpg-back-btn:active {
+            transform: scale(0.95);
+            background-color: rgba(220, 185, 125, 0.22);
+            border-color: rgba(220, 185, 125, 0.8);
+        }
+
+        /* RPG SUB WINDOW CUSTOM STYLE */
+        .rpg-sub-window-panel {
+            background: radial-gradient(circle at center, #1c182a 0%, #0f0d16 100%);
+            border: 2px solid #5d4f3b;
+            box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.7), 0 20px 45px rgba(0, 0, 0, 0.95);
+        }
+
+        /* Constellation & Particle Animations */
+        @keyframes constellation-glow {
+            0%, 100% { opacity: 0.15; stroke-width: 1; }
+            50% { opacity: 0.45; stroke-width: 1.5; }
+        }
+        .animate-constellation-glow {
+            animation: constellation-glow 5s ease-in-out infinite;
+        }
+        @keyframes float-sparkle {
+            0% { transform: translateY(0) scale(0.3); opacity: 0; }
+            50% { opacity: 0.6; }
+            100% { transform: translateY(-80px) scale(1); opacity: 0; }
+        }
+        .animate-float-sparkle {
+            animation: float-sparkle var(--float-duration) ease-in-out infinite;
+        }
+
+        /* Navigation Details Transitions */
+        .menu-detail-panel {
+            animation: panelFadeIn 0.25s ease-out forwards;
+        }
+        @keyframes panelFadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        /* Style cho Joystick di động */
+        .joystick-zone {
+            width: 130px;
+            height: 130px;
+            background: rgba(15, 23, 42, 0.4);
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(8px);
+            border-radius: 50%;
+            position: absolute;
+            bottom: 40px;
+            left: 40px;
+            z-index: 40;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            touch-action: none;
+            box-shadow: 0 8px 32px 0 rgba(15, 23, 42, 0.3);
+            transition: opacity 0.2s ease;
+        }
+        .joystick-handle {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(148, 163, 184, 0.95));
+            border-radius: 50%;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            touch-action: none;
+            transition: transform 0.05s ease-out;
+        }
+        /* Phản hồi xúc giác khi tương tác nút bấm */
+        .combat-btn {
+            -webkit-tap-highlight-color: transparent;
+            touch-action: none;
+        }
+        .combat-btn:active {
+            transform: scale(0.92);
+            filter: brightness(1.2);
+        }
+        /* Burst-ready glow pulse */
+        @keyframes burst-ready-pulse {
+            0%   { box-shadow: 0 0 8px 2px rgba(34,211,238,0.5), 0 0 0 0 rgba(34,211,238,0.3); }
+            50%  { box-shadow: 0 0 22px 8px rgba(34,211,238,0.9), 0 0 0 8px rgba(34,211,238,0.0); }
+            100% { box-shadow: 0 0 8px 2px rgba(34,211,238,0.5), 0 0 0 0 rgba(34,211,238,0.3); }
+        }
+        .burst-ready {
+            animation: burst-ready-pulse 1.2s ease-in-out infinite;
+            border-color: rgba(59, 163, 255, 0.8) !important;
+            box-shadow: 0 0 15px rgba(59, 163, 255, 0.4);
+        }
+        /* Hydro hit screen flash */
+        @keyframes hydro-flash-fade {
+            0%   { opacity: 0.38; }
+            100% { opacity: 0; }
+        }
+        #hydro-flash.active {
+            animation: hydro-flash-fade 0.22s ease-out forwards;
+        }
+        /* Mobile walk toggle — active state highlights warm gold */
+        #mobile-walk-toggle.walk-active {
+            background: rgba(180, 140, 80, 0.35) !important;
+            border-color: rgba(220, 185, 125, 0.8) !important;
+            color: #dec89a !important;
+        }
+        #mobile-walk-toggle.walk-active i {
+            color: #dec89a;
+        }
+        /* Ripple shimmer on burst water surface */
+        @keyframes burst-water-shimmer {
+            0%   { opacity: 0.5; transform: scaleX(1.0); }
+            50%  { opacity: 0.9; transform: scaleX(1.05); }
+            100% { opacity: 0.5; transform: scaleX(1.0); }
+        }
+        #desktop-burst-ripple, #mobile-burst-ripple {
+            animation: burst-water-shimmer 1.2s ease-in-out infinite;
+        }
+
+        /* --- MOBILE UI POLISH: Custom Styling cho Slider --- */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+            margin: 15px 0;
+            padding: 10px 0;
+            touch-action: pan-x; 
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 32px; 
+            width: 32px;
+            border-radius: 50%;
+            background: #dcb97d;
+            cursor: pointer;
+            margin-top: -13px;
+            box-shadow: 0 0 12px rgba(220, 185, 125, 0.6), inset 0 0 4px rgba(255, 255, 255, 0.4);
+            transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.1s;
+        }
+        input[type=range]::-webkit-slider-thumb:active {
+            transform: scale(1.2);
+            box-shadow: 0 0 20px rgba(220, 185, 125, 0.9), inset 0 0 6px rgba(255, 255, 255, 0.8);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 6px;
+            cursor: pointer;
+            background: #3e3a34;
+            border-radius: 3px;
+        }
+        input[type=range]:focus {
+            outline: none;
+        }
+
+        /* --- MOBILE UI POLISH: Scrollable Info Panel --- */
+        .scrollable-panel {
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch; 
+            overscroll-behavior-y: contain; 
+            touch-action: pan-y;
+        }
+        .scrollable-panel::-webkit-scrollbar {
+            width: 6px;
+        }
+        .scrollable-panel::-webkit-scrollbar-track {
+            background: rgba(46, 42, 37, 0.5); 
+            border-radius: 4px;
+        }
+        .scrollable-panel::-webkit-scrollbar-thumb {
+            background: rgba(220, 185, 125, 0.4); 
+            border-radius: 4px;
+        }
+
+        /* RPG GENSHIN-LIKE FANTASY UI THEME */
+        .rpg-panel {
+            background: radial-gradient(circle at center, #2e2a24 0%, #1c1916 100%);
+            border: 2px solid #4a3e30;
+            box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.6), 0 10px 25px rgba(0, 0, 0, 0.8);
+        }
+        .rpg-sidebar {
+            background-color: #1a1714;
+            border-right: 1px solid #3d352c;
+        }
+        .rpg-tab {
+            color: #a59c90;
+            border-left: 4px solid transparent;
+            transition: all 0.25s ease;
+        }
+        .rpg-tab:hover {
+            background-color: rgba(180, 140, 80, 0.08);
+            color: #dec89a;
+        }
+        .rpg-tab-active {
+            background: linear-gradient(90deg, rgba(180, 140, 80, 0.15) 0%, rgba(180, 140, 80, 0) 100%);
+            border-left: 4px solid #dcb97d;
+            color: #f7e8cf;
+            text-shadow: 0 0 8px rgba(220, 185, 125, 0.4);
+        }
+        .rpg-btn {
+            background: linear-gradient(180deg, #4d443a 0%, #2f2821 100%);
+            border: 1px solid #6b5c4c;
+            color: #ebdcb9;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            transition: all 0.2s ease;
+        }
+        .rpg-btn:hover:not(:disabled) {
+            background: linear-gradient(180deg, #615649 0%, #3e342a 100%);
+            border-color: #dcb97d;
+            color: #fff4db;
+        }
+        .rpg-btn:active:not(:disabled) {
+            transform: scale(0.98);
+        }
+        .rpg-divider {
+            height: 1px;
+            background: linear-gradient(90deg, transparent 0%, #4a3e30 50%, transparent 100%);
+        }
+        .rpg-scroll-bg {
+            background-color: #171412;
+            border: 1px solid #332d26;
+        }
+
+        /* HIỆU ỨNG MÀN HÌNH TỐI KHI ĐUỐI NƯỚC */
+        #drown-fade {
+            transition: opacity 0.5s ease-in-out;
+        }
+
+        @keyframes star-pulse {
+            0%, 100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(235, 220, 185, 0.4)); }
+            50% { transform: scale(1.08); filter: drop-shadow(0 0 8px rgba(235, 220, 185, 0.8)); }
+        }
+        .animate-star-glow {
+            animation: star-pulse 2.5s ease-in-out infinite;
+        }
+        @keyframes star-click {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.15); }
+            100% { transform: scale(1); }
+        }
+        .star-active-bounce {
+            animation: star-click 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
