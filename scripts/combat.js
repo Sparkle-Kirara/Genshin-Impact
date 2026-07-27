@@ -73,7 +73,10 @@
 
                 const impactPos = player.position.clone();
                 const plungeRadius = 4.0;
-                const plungeDamage = player.attack.plunge; 
+                // Pre-Alpha v0.7 — Core Stats: player.attack.plunge là MULTIPLIER (hệ số nhân ATK),
+                // không phải "damage tuyệt đối" — enemy.takeDamage() tự tính Final Damage qua
+                // calculateFinalDamage(player.stats.atk, enemy.stats.def, multiplier) bên trong.
+                const plungeDamageMultiplier = player.attack.plunge; 
 
                 enemies.forEach(enemy => {
                     if (!enemy.alive) return;
@@ -84,7 +87,7 @@
                         pushDir.normalize();
                         if (pushDir.lengthSq() === 0) pushDir.set(1, 0, 0);
 
-                        enemy.takeDamage(plungeDamage, pushDir, true); 
+                        enemy.takeDamage(plungeDamageMultiplier, pushDir, true); 
 
                         if (enemy.bodyMesh) {
                             enemy.mesh.scale.set(1.5, 0.38, 1.5);
@@ -317,6 +320,10 @@
                 scene.add(projMesh);
 
                 const cfg = ELEMENTAL_SKILL_CONFIG.smallShot;
+                // Pre-Alpha v0.7 — Core Stats: kết quả này là MULTIPLIER tổng hợp (hệ số attack.
+                // hydroProjectile của player × hệ số riêng cfg.damage của loại đạn), KHÔNG phải damage
+                // tuyệt đối — enemy.takeDamage() tự tính Final Damage qua calculateFinalDamage() bên
+                // trong.
                 activeProjectiles.push({
                     type: 'hydro_small', mesh: projMesh, dir: forward,
                     speed: cfg.speed, damage: player.attack.hydroProjectile * cfg.damage, maxRange: cfg.maxRange, distanceTraveled: 0,
@@ -336,7 +343,8 @@
                 const forward = customDir ? customDir.clone().normalize() : new THREE.Vector3(Math.sin(player.mesh.rotation.y), 0, Math.cos(player.mesh.rotation.y)).normalize();
                 const origin = player.position.clone().addScaledVector(forward, 0.9);
                 const cfg = ELEMENTAL_SKILL_CONFIG.pressureShot;
-                const damage = player.attack.hydroProjectile * cfg.damage;
+                // Pre-Alpha v0.7 — Core Stats: MULTIPLIER tổng hợp, xem giải thích ở fireHydroProjectile().
+                const damageMultiplier = player.attack.hydroProjectile * cfg.damage;
 
                 // --- Tìm mọi enemy còn sống cắt ngang đường thẳng [origin, origin + forward*maxRange] ---
                 // Chiếu vị trí enemy lên đường thẳng (projection scalar t), kiểm tra:
@@ -363,7 +371,7 @@
                 hitEnemies.sort((a, b) => a.t - b.t);
 
                 for (const { enemy, t } of hitEnemies) {
-                    enemy.takeDamage(damage, forward, true);
+                    enemy.takeDamage(damageMultiplier, forward, true);
                     const hitPos = origin.clone().addScaledVector(forward, t);
                     spawnHydroSplash(hitPos, forward, true);
                     triggerHydroFlash();
@@ -611,7 +619,8 @@
             function updateBurst(dt) {
                 if (!player.isBursting || !player.burstSphere) return;
                 const cfg = BURST_CONFIG;
-                const damage = player.attack.burst * cfg.damage;
+                // Pre-Alpha v0.7 — Core Stats: MULTIPLIER tổng hợp (xem giải thích ở fireHydroProjectile()).
+                const damageMultiplier = player.attack.burst * cfg.damage;
 
                 // --- DI CHUYỂN LIÊN TỤC: Bubble không bao giờ đứng yên, luôn trôi theo hướng đã chọn ---
                 player.burstRotTimer += dt;
@@ -695,7 +704,7 @@
                         pushDir.y = 0;
                         if (pushDir.lengthSq() < 0.0001) pushDir.set(1, 0, 0); else pushDir.normalize();
 
-                        enemy.takeDamage(damage, pushDir, true);
+                        enemy.takeDamage(damageMultiplier, pushDir, true);
                         spawnHydroSplash(bPos.clone(), pushDir, true);
                         triggerHydroFlash();
                         sfx.playHydroSplash();

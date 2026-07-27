@@ -17,7 +17,8 @@
 //   spawnDeathParticles, spawnCombatSparks, spawnDashWindTrail,
 //   spawnEnergyParticles, spawnHydroTrail, spawnHydroSplash, triggerHydroFlash,
 //   spawnBurstTrail, updateEnergyParticles, spawnPlayerGhost, spawnRunTrail,
-//   spawnGliderTrailParticles, spawnPlungeTrailParticles, spawnPlungeImpactVisuals
+//   spawnGliderTrailParticles, spawnPlungeTrailParticles, spawnPlungeImpactVisuals,
+//   spawnDamageNumber, updateDamageNumbers (Pre-Alpha v0.7 — Core Stats)
 // ============================================================
 
             function spawnDeathParticles(position) {
@@ -337,3 +338,108 @@
                 }
             }
             window.spawnPlungeImpactVisuals = spawnPlungeImpactVisuals;
+
+            // ============================================================
+            // DAMAGE NUMBER (Pre-Alpha v0.7 — Core Stats)
+            // ============================================================
+            // Vẽ số sát thương lên 1 CanvasTexture nhỏ rồi gán vào THREE.Sprite — Sprite luôn tự quay
+            // mặt về camera (billboard), nên số hiển thị rõ ràng từ MỌI góc nhìn, khác với việc vẽ số
+            // lên 1 mặt phẳng Mesh thường (sẽ bị "lật ngược"/biến mất khi nhìn từ sau).
+            //
+            // Cache 1 canvas DÙNG CHUNG cho mọi lần spawn (không tạo canvas mới mỗi lần gọi) — chỉ
+            // texture (ảnh) là tạo mới mỗi lần vì nội dung số khác nhau; bản thân phần tử <canvas> tái
+            // sử dụng để giảm áp lực garbage collector trên mobile khi combat dồn dập.
+            let damageNumberCanvas = null;
+            let damageNumberCtx = null;
+            function getDamageNumberCanvas() {
+                if (!damageNumberCanvas) {
+                    damageNumberCanvas = document.createElement('canvas');
+                    damageNumberCanvas.width = 128;
+                    damageNumberCanvas.height = 64;
+                    damageNumberCtx = damageNumberCanvas.getContext('2d');
+                }
+                return { canvas: damageNumberCanvas, ctx: damageNumberCtx };
+            }
+
+            // spawnDamageNumber(position, amount): position là điểm world-space bắt đầu (đã tính sẵn
+            // offset lên trên đầu enemy/player ở nơi gọi — xem enemies.js/game.js), amount là số
+            // nguyên đã tính xong bởi calculateFinalDamage() (KHÔNG tính toán gì thêm ở đây, hàm này
+            // thuần là hiển thị).
+            function spawnDamageNumber(position, amount) {
+                const scene = window.scene;
+                const damageNumbers = window.damageNumbers;
+                if (!scene || !damageNumbers) return;
+
+                const { canvas, ctx } = getDamageNumberCanvas();
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.font = 'bold 40px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                // Viền đen mỏng quanh chữ để số luôn đọc được dù nền sáng hay tối phía sau (đồng cỏ,
+                // nước, đá...) — cùng nguyên tắc dễ đọc như HUD hiện có.
+                ctx.lineWidth = 6;
+                ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+                ctx.strokeText(String(amount), canvas.width / 2, canvas.height / 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(String(amount), canvas.width / 2, canvas.height / 2);
+
+                // Texture mới mỗi lần (nội dung số khác nhau) — canvas element được tái sử dụng ở
+                // trên, chỉ phần upload lên GPU (texture) là tốn kém, không tránh được vì nội dung
+                // hình ảnh thực sự khác nhau mỗi lần.
+                const texture = new THREE.CanvasTexture(canvas);
+                const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+                const sprite = new THREE.Sprite(material);
+                sprite.position.copy(position);
+                // Kích thước world-space cố định (không phụ thuộc độ dài chuỗi số) — đủ đọc rõ ở
+                // khoảng cách combat thông thường, không quá to gây rối mắt khi nhiều số chồng nhau.
+                sprite.scale.set(1.1, 0.55, 1);
+                sprite.renderOrder = 999; // Luôn vẽ đè lên particle/enemy phía sau, tránh bị che khuất
+                scene.add(sprite);
+
+                damageNumbers.push({
+                    sprite: sprite,
+                    material: material,
+                    texture: texture,
+                    // Bay lên + trôi ngang nhẹ (ngẫu nhiên trái/phải) để nhiều số liên tiếp không đè
+                    // thẳng hàng lên nhau, dễ đọc hơn khi combat dồn dập (nhiều đòn liên tục).
+                    velocity: new THREE.Vector3((Math.random() - 0.5) * 0.6, 1.8, (Math.random() - 0.5) * 0.6),
+                    life: 0.8, maxLife: 0.8
+                });
+            }
+            window.spawnDamageNumber = spawnDamageNumber;
+
+            // updateDamageNumbers(dt): gọi mỗi frame từ animate() (game.js), TÁCH RIÊNG khỏi vòng lặp
+            // updateParticles chính — xem giải thích lý do ở khai báo window.damageNumbers (game.js).
+            function updateDamageNumbers(dt) {
+                const scene = window.scene;
+                const damageNumbers = window.damageNumbers;
+                if (!scene || !damageNumbers) return;
+
+                for (let i = damageNumbers.length - 1; i >= 0; i--) {
+                    const d = damageNumbers[i];
+                    d.life -= dt;
+
+                    d.sprite.position.addScaledVector(d.velocity, dt);
+                    // Chậm dần theo thời gian (giống trọng lực ngược nhẹ) — số bay chậm lại về cuối
+                    // vòng đời thay vì bay đều tốc độ, cảm giác tự nhiên hơn.
+                    d.velocity.y -= 1.2 * dt;
+
+                    d.material.opacity = Math.max(0, d.life / d.maxLife);
+
+                    if (d.life <= 0) {
+                        scene.remove(d.sprite);
+                        // Chỉ dispose material/texture RIÊNG của sprite này (mỗi damage number có
+                        // SpriteMaterial + CanvasTexture RIÊNG, không dùng chung) — an toàn tuyệt đối,
+                        // không ảnh hưởng sprite khác. KHÔNG gọi d.sprite.geometry.dispose(): geometry
+                        // của THREE.Sprite là 1 PlaneGeometry TĨNH DÙNG CHUNG cho mọi Sprite trong toàn
+                        // bộ ứng dụng (Sprite.prototype hoặc tương đương nội bộ three.js) — dispose()
+                        // nó sẽ phá hỏng MỌI Sprite khác đang tồn tại, kể cả những cái được tạo sau
+                        // này.
+                        d.material.dispose();
+                        d.texture.dispose();
+                        damageNumbers.splice(i, 1);
+                    }
+                }
+            }
+            window.updateDamageNumbers = updateDamageNumbers;
+

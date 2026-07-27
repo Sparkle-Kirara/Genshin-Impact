@@ -1026,6 +1026,16 @@
             // Hiệu ứng hình ảnh của Pressure Shot (instant beam) — KHÔNG di chuyển, chỉ fade rồi tự hủy.
             // Tách riêng khỏi activeProjectiles vì không có logic bay/va chạm, chỉ là visual thuần túy.
             const activeHydroBeamVisuals = window.activeHydroBeamVisuals = [];
+            // Pre-Alpha v0.7 — Core Stats: Damage Number (số sát thương bay lên). TÁCH RIÊNG khỏi
+            // mảng particles ở trên dù về khái niệm cũng là 1 loại "hiệu ứng bay lên rồi biến mất" —
+            // lý do: particles/updateParticles() (cuối animate()) giả định p.mesh là THREE.Mesh
+            // (dùng p.mesh.geometry.dispose(), p.mesh.scale.multiplyScalar()...), trong khi Damage
+            // Number cần THREE.Sprite (billboard luôn quay mặt về camera, để số hiển thị rõ từ MỌI
+            // góc nhìn thay vì bị "lật ngược" khi camera đi vòng ra sau như Mesh phẳng thường). API
+            // của Sprite khác Mesh (geometry dùng chung/static giữa các Sprite theo thiết kế của
+            // Three.js) nên gọi chung 1 vòng lặp dispose() như particles có rủi ro làm hỏng Sprite
+            // khác — dùng vòng lặp update riêng (updateDamageNumbers(), trong vfx.js) để an toàn.
+            const damageNumbers = window.damageNumbers = [];
             // nextEnemyId dùng getter/setter (thay vì gán thẳng) vì đây là số nguyên tăng dần — gán thẳng
             // window.nextEnemyId = nextEnemyId chỉ copy giá trị tại thời điểm đó, không đồng bộ về sau.
             // enemies.js (Enemy/Slime constructor) tăng giá trị này qua window.nextEnemyId++.
@@ -1109,8 +1119,11 @@
                 slime: {
                     drops: [
                         { itemId: 'slime_condensate', chance: 1.0, min: 1, max: 2 }
-                    ],
-                    exp: { min: 5, max: 10 }
+                    ]
+                    // Pre-Alpha v0.7 — Core Stats: EXP không còn nằm ở đây (trước là random {min,max}
+                    // KHÔNG phân biệt Small/Large Slime). core_stats.md mục 7 quy định EXP Reward là
+                    // SỐ CỐ ĐỊNH riêng theo từng loại (Small=10, Large=30) — đọc trực tiếp từ
+                    // slime.expReward (gán trong constructor, enemies.js) tại onSlimeKilled() bên dưới.
                 }
             };
             window.ENEMY_LOOT_TABLES = ENEMY_LOOT_TABLES;
@@ -1133,25 +1146,70 @@
                 });
             }
 
-            // --- GỌI KHI 1 SLIME BỊ TIÊU DIỆT (v0.6 Wilderness) — xử lý Drop + EXP ---
+            // --- GỌI KHI 1 SLIME BỊ TIÊU DIỆT (v0.6 Wilderness, cập nhật EXP ở v0.7 Core Stats) ---
             // Gọi từ Slime.takeDamage() trong enemies.js NGAY TRƯỚC/CÙNG LÚC với onEnemyKilled('slime')
             // (tách biệt 2 hàm: onEnemyKilled lo cập nhật quest tiến độ 'kill', onSlimeKilled lo
             // drop/exp — single-responsibility, không gộp chung để dễ mở rộng độc lập). Nhận thẳng
-            // instance `slime` (không chỉ targetType string) để có vị trí chính xác cho loot rơi ra.
+            // instance `slime` (không chỉ targetType string) để có vị trí chính xác cho loot rơi ra
+            // VÀ để đọc đúng slime.expReward (khác nhau giữa Small/Large — xem enemies.js).
             function onSlimeKilled(slime) {
                 const lootTable = ENEMY_LOOT_TABLES.slime;
                 if (!lootTable) return;
 
                 spawnLootDrops(slime.position, lootTable);
 
-                if (lootTable.exp) {
-                    const expAmount = Math.floor(Math.random() * (lootTable.exp.max - lootTable.exp.min + 1)) + lootTable.exp.min;
+                // Pre-Alpha v0.7 — Core Stats: EXP CỐ ĐỊNH theo loại slime (core_stats.md mục 7),
+                // không còn random.
+                if (typeof slime.expReward === 'number') {
                     const handler = REWARD_HANDLERS.exp;
-                    if (handler) handler(expAmount);
+                    if (handler) handler(slime.expReward);
                 }
             }
             window.onSlimeKilled = onSlimeKilled;
 
+            // ============================================================
+            // HỆ THỐNG CORE STATS (Pre-Alpha v0.7)
+            // ============================================================
+            // Nền tảng chỉ số + công thức sát thương DÙNG CHUNG cho Player và mọi Enemy — không nơi
+            // nào khác trong codebase được tự tính damage theo cách riêng (nhân số tùy ý, trừ HP trực
+            // tiếp...). Mọi combat action (melee, plunge, hydroProjectile, burst, đòn đánh của Slime)
+            // đều phải đi qua ĐÚNG 1 hàm calculateFinalDamage() bên dưới.
+            //
+            // --- COMBAT_CONSTANTS: hằng số cân bằng, KHÔNG hard-code rải rác nơi khác ---
+            //   DEFENSE_CONSTANT: hằng số trong công thức giảm sát thương theo DEF (xem bên dưới).
+            //                     Giá trị càng lớn thì DEF càng "yếu" (cần nhiều DEF hơn mới giảm được
+            //                     cùng % sát thương) — đây là con số DUY NHẤT cần chỉnh khi cân bằng
+            //                     lại độ khó tổng thể của toàn bộ game trong tương lai.
+            const COMBAT_CONSTANTS = {
+                DEFENSE_CONSTANT: 100
+            };
+            window.COMBAT_CONSTANTS = COMBAT_CONSTANTS;
+
+            // calculateFinalDamage(atk, def, multiplier = 1):
+            //   Final Damage = (ATK × multiplier) × DEFENSE_CONSTANT / (DEFENSE_CONSTANT + DEF)
+            //
+            //   atk: chỉ số ATK của bên gây sát thương (player.stats.atk hoặc enemy.stats.atk).
+            //   def: chỉ số DEF của bên nhận sát thương.
+            //   multiplier: hệ số riêng theo LOẠI đòn đánh (VD melee=1, plunge=3, burst=4 — xem
+            //               player.attack.* bên dưới) — KHÔNG phải "damage points" độc lập như trước
+            //               v0.7, mà là hệ số nhân lên ATK gốc trước khi đưa vào công thức giảm theo
+            //               DEF. Mặc định 1 cho các trường hợp không có multiplier riêng (VD đòn đánh
+            //               thường của Enemy lên Player).
+            //
+            //   Phòng vệ: DEF âm (chưa từng xảy ra, nhưng debuff tương lai có thể tạo ra) được clamp
+            //   về 0 để mẫu số không bao giờ <= 0 (tránh chia cho 0 hoặc âm — kết quả càng âm DEF thì
+            //   sát thương càng KHUẾCH ĐẠI, ngược hẳn ý nghĩa của DEF). Kết quả cuối làm tròn TỚI SỐ
+            //   NGUYÊN GẦN NHẤT (Math.round — không phải Math.floor) và không bao giờ âm (Math.max 0).
+            //   Xác định qua đối chiếu ví dụ "Slime ATK=12, Player DEF=10 -> Final Damage≈11" trong
+            //   core_stats.md mục 7: giá trị thô là 12×100/(100+10) = 10.909 — Math.floor cho 10 (SAI
+            //   lệch với spec), chỉ Math.round mới cho đúng 11.
+            function calculateFinalDamage(atk, def, multiplier = 1) {
+                const safeDef = Math.max(0, def || 0);
+                const safeAtk = Math.max(0, atk || 0);
+                const raw = (safeAtk * multiplier) * COMBAT_CONSTANTS.DEFENSE_CONSTANT / (COMBAT_CONSTANTS.DEFENSE_CONSTANT + safeDef);
+                return Math.max(0, Math.round(raw));
+            }
+            window.calculateFinalDamage = calculateFinalDamage;
 
             // Vị trí spawn/hồi sinh mặc định của player — nguồn sự thật duy nhất, dùng cho cả
             // respawn sau khi chết (combat/drown/fall) VÀ teleport khi rơi khỏi vùng chơi hợp lệ (void).
@@ -1164,8 +1222,26 @@
                 velocity: new THREE.Vector3(0, 0, 0),
                 inputVelocity: new THREE.Vector3(0, 0, 0), 
                 
-                hp: 100, maxHp: 100, invulnTimer: 0.0, staggerTimer: 0.0, isDead: false,
-                // Chỉ số sát thương tập trung — mỗi loại đòn đọc từ đây thay vì hard-code.
+                // --- CORE STATS (Pre-Alpha v0.7) — nguồn sự thật DUY NHẤT cho chỉ số chiến đấu của
+                // Player, dùng chung công thức calculateFinalDamage() với mọi Enemy. Số liệu cân bằng
+                // ban đầu theo core_stats.md mục 7 (Pre-Alpha, chưa phải giá trị cuối cùng).
+                // Thiết kế mở: object phẳng nên sau này thêm critRate/critDmg/elementalMastery/
+                // energyRecharge/healingBonus/elementalBonus/shieldStrength... chỉ cần thêm field mới
+                // vào đây, không cần đổi cấu trúc hay sửa nơi khác đang đọc stats.atk/stats.def.
+                stats: { maxHp: 100, hp: 100, atk: 20, def: 10 },
+                // player.hp/player.maxHp giữ nguyên là property TRUY CẬP ĐƯỢC (không phải object lồng
+                // nhau) để KHÔNG phải sửa hàng chục chỗ trong game.js/combat.js/ui.js đang đọc/ghi
+                // player.hp trực tiếp (VD "player.hp -= x", "player.hp <= 0") — thực chất đọc/ghi
+                // xuyên qua get/set này vào đúng player.stats.hp/maxHp, đảm bảo LUÔN có đúng 1 nguồn
+                // dữ liệu HP (không có 2 bản sao lệch nhau).
+                get hp() { return this.stats.hp; },
+                set hp(v) { this.stats.hp = v; },
+                get maxHp() { return this.stats.maxHp; },
+                set maxHp(v) { this.stats.maxHp = v; },
+                invulnTimer: 0.0, staggerTimer: 0.0, isDead: false,
+                // Hệ số nhân theo LOẠI đòn đánh (multiplier trong calculateFinalDamage) — KHÔNG còn
+                // là "damage points" độc lập như trước v0.7. Final Damage thực tế của 1 đòn melee =
+                // calculateFinalDamage(player.stats.atk, enemy.stats.def, player.attack.melee).
                 attack: { melee: 1, plunge: 3, burst: 4, hydroProjectile: 1.5 },
                 energy: 0, maxEnergy: 40, skillHitCount: 0,
 
@@ -3218,7 +3294,7 @@
                 if (isGamePaused || window.isDialogueOpen || player.isDrowning || player.isDead) return;
 
                 const k = e.key.toLowerCase();
-                if (k === 'w' || k === "ư"|| e.key === 'ArrowUp') keys.w = true;
+                if (k === 'w' || e.key === 'ArrowUp') keys.w = true;
                 if (k === 's' || e.key === 'ArrowDown') keys.s = true;
                 if (k === 'a' || e.key === 'ArrowLeft') keys.a = true;
                 if (k === 'd' || e.key === 'ArrowRight') keys.d = true;
@@ -4031,9 +4107,17 @@
                 enemies.forEach(enemy => {
                     if (!enemy.alive || enemy.isSlime) return; // Slime dùng cơ chế attack telegraph riêng (xem Slime.update)
                     if (player.position.distanceTo(enemy.position) < ((player.width + enemy.width) * 0.45) && player.invulnTimer <= 0) {
-                        const dmg = enemy.attackDamage || 10;
+                        // Pre-Alpha v0.7 — Core Stats: dùng calculateFinalDamage() nhất quán với Slime,
+                        // thay vì enemy.attackDamage (thuộc tính đã bị loại bỏ khỏi class Enemy khi
+                        // chuyển sang this.stats — xem enemies.js).
+                        const dmg = calculateFinalDamage(enemy.stats.atk, player.stats.def);
                         player.hp = Math.max(0, player.hp - dmg); player.invulnTimer = 0.8; 
                         triggerDamageFlash(); sfx.playHit();
+                        if (spawnDamageNumber) {
+                            const numberOrigin = player.position.clone();
+                            numberOrigin.y += player.height * 0.75;
+                            spawnDamageNumber(numberOrigin, dmg);
+                        }
                         cameraState.shakeTimer = 0.25; cameraState.shakeIntensity = 0.35;
                         const pushDir = new THREE.Vector3().subVectors(player.position, enemy.position); pushDir.y = 0;
                         player.velocity.add(pushDir.normalize().multiplyScalar(5.0));
@@ -4315,6 +4399,8 @@
                         const enemy = enemies[j];
                         if (enemy.alive && intersectAABB(pAABB, enemy.aabb)) {
                             const isHydroProj = proj.type === 'hydro_small';
+                            // Pre-Alpha v0.7 — Core Stats: proj.damage là MULTIPLIER tổng hợp (xem
+                            // fireHydroProjectile() trong combat.js), không phải damage tuyệt đối.
                             enemy.takeDamage(proj.damage, proj.dir, isHydroProj);
 
                             if (isHydroProj) {
@@ -4533,6 +4619,7 @@
                         updateHydroBeamVisuals(dt);
                         updateBurst(dt);
                         updateEnergyParticles(dt);
+                        updateDamageNumbers(dt); // Pre-Alpha v0.7 — Core Stats
                         updateCampRespawns(dt);
 
                         for (let i = enemies.length - 1; i >= 0; i--) {
@@ -4545,6 +4632,13 @@
                                     enemy.bodyMesh.geometry.dispose();
                                     enemy.bodyMesh.material.dispose();
                                 }
+                                // Pre-Alpha v0.7 — Core Stats: dispose HP bar sprite material — mỗi
+                                // slime có material RIÊNG (không dùng chung, xem constructor), an toàn
+                                // dispose không ảnh hưởng slime khác. KHÔNG cần dispose geometry (Sprite
+                                // dùng geometry tĩnh dùng chung toàn cục — xem giải thích tương tự ở
+                                // vfx.js updateDamageNumbers()).
+                                if (enemy.hpBarBg) enemy.hpBarBg.material.dispose();
+                                if (enemy.hpBarFill) enemy.hpBarFill.material.dispose();
                                 enemies.splice(i, 1);
                             }
                         }

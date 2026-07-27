@@ -27,12 +27,17 @@
                 constructor(x, z) {
                     this.id = window.nextEnemyId++;
                     this.width = 0.8; this.height = 1.6; this.depth = 0.8;
-                    this.attackDamage = 15;
                     
                     const initialY = window.getInitialGroundY(x, z, this.width, this.depth);
                     this.position = new THREE.Vector3(x, initialY + this.height / 2, z); 
                     this.velocity = new THREE.Vector3(0, 0, 0); 
-                    this.maxHp = 999999; this.hp = this.maxHp;
+                    // --- CORE STATS (v0.7) — class Enemy là quái placeholder/testing bất tử (comment
+                    // đầu file), không phải đối tượng chiến đấu thật sự (spec v0.7 chỉ định nghĩa số
+                    // liệu cho Player/Small Slime/Large Slime) — giữ nguyên maxHp cực cao, ATK/DEF ở
+                    // mức tối thiểu chỉ để không lỗi nếu lỡ có code khác gọi calculateFinalDamage()
+                    // với enemy loại này. hp/maxHp đọc/ghi xuyên qua get/set (khai báo ở class body,
+                    // xem bên dưới constructor) vào đúng this.stats.hp/maxHp.
+                    this.stats = { maxHp: 999999, hp: 999999, atk: 15, def: 0 };
                     this.alive = true; this.respawnTimer = 0; this.flashTimer = 0;
                     this.knockback = new THREE.Vector3();
                     this.idleTimer = Math.random() * 100;
@@ -63,6 +68,14 @@
                     this.aabb.updateFromObject(this.mesh, this.width, this.height, this.depth);
                     this.alignToGround();
                 }
+
+                // hp/maxHp đọc/ghi xuyên qua this.stats.hp/maxHp — giữ tương thích với mọi code cũ
+                // đang dùng "enemy.hp -= x" / "enemy.hp <= 0" trực tiếp (không cần sửa lại các chỗ
+                // đó), trong khi Core Stats thật sự sống trong this.stats (nguồn dữ liệu duy nhất).
+                get hp() { return this.stats.hp; }
+                set hp(v) { this.stats.hp = v; }
+                get maxHp() { return this.stats.maxHp; }
+                set maxHp(v) { this.stats.maxHp = v; }
 
                 alignToGround() {
                     let bestGroundY = getTerrainHeight(this.position.x, this.position.z); 
@@ -164,17 +177,21 @@
                     this.id = window.nextEnemyId++; this.isSlime = true;
                     if (isLarge) {
                         this.isLarge = true; this.width = 2.8; this.height = 2.0; this.depth = 2.8;
-                        this.maxHp = 16; this.speed = 2.0; this.chaseSpeed = 4.2;
+                        this.speed = 2.0; this.chaseSpeed = 4.2;
                         this.detectRadius = 15.0; this.loseRadius = 30.0; this.chaseCooldown = 0.6; this.jumpPowerY = 9.0;
-                        this.minAttackDamage = 14; this.maxAttackDamage = 18;
+                        // --- CORE STATS (v0.7) — số liệu Large Slime theo core_stats.md mục 7.
+                        this.stats = { maxHp: 180, hp: 180, atk: 20, def: 10 };
+                        this.expReward = 30; // dùng bởi onSlimeKilled() (game.js) khi tính EXP rơi ra
                         this.attackRange = 2.0; // khoảng cách để bắt đầu chuẩn bị tấn công
                         this.attackTelegraphDuration = 0.5; // giây chuẩn bị trước khi lao vào
                         this.attackHitRange = 2.3; // khoảng cách tối đa để đòn đánh trúng
                     } else {
                         this.isLarge = false; this.width = 1.6; this.height = 0.8; this.depth = 1.6;
-                        this.maxHp = 6; this.speed = 3.5; this.chaseSpeed = 7.0; 
+                        this.speed = 3.5; this.chaseSpeed = 7.0; 
                         this.detectRadius = 15.0; this.loseRadius = 30.0; this.chaseCooldown = 0.35; this.jumpPowerY = 7.2;
-                        this.minAttackDamage = 6; this.maxAttackDamage = 10;
+                        // --- CORE STATS (v0.7) — số liệu Small Slime theo core_stats.md mục 7.
+                        this.stats = { maxHp: 80, hp: 80, atk: 12, def: 5 };
+                        this.expReward = 10;
                         this.attackRange = 1.6;
                         this.attackTelegraphDuration = 0.4;
                         this.attackHitRange = 1.8;
@@ -185,8 +202,10 @@
                     const initialY = window.getInitialGroundY(x, z, this.width, this.depth);
                     this.position = new THREE.Vector3(x, initialY + this.height / 2, z);
                     this.velocity = new THREE.Vector3(0, 0, 0);
-                    this.hp = this.maxHp; 
                     this.alive = true; this.respawnTimer = 0; this.flashTimer = 0; this.knockback = new THREE.Vector3();
+                    // --- ENEMY HP BAR (v0.7) — hiện khi vừa bị đánh HOẶC player ở gần, ẩn sau khoảng
+                    // lặng không có gì xảy ra (xem update()). Đếm NGƯỢC về 0 = còn hiện, <=0 = ẩn.
+                    this.hpBarVisibleTimer = 0;
                     this.state = 'idle'; this.stateTimer = Math.random() * 2.0; this.wanderAngle = Math.random() * Math.PI * 2;
                     this.idleBobTimer = Math.random() * 50; this.jumpVelocity = new THREE.Vector3(); this.jumpVelocityY = 0;
                     this.isGrounded = true;
@@ -221,8 +240,67 @@
                     
                     this.mesh = group; this.mesh.position.copy(this.position); window.scene.add(this.mesh);
                     this.aabb = new window.AABB(); this.aabb.updateFromObject(this.mesh, this.width, this.height, this.depth);
+
+                    // --- ENEMY HP BAR (Pre-Alpha v0.7 — Core Stats) ---
+                    // 2 Sprite chồng lên nhau, làm CON của this.mesh (group) — tự động di chuyển/theo
+                    // enemy mỗi frame KHÔNG cần code cập nhật vị trí thủ công, vì Three.js tự cộng dồn
+                    // transform cha-con. Billboard tự quay mặt camera (đặc tính có sẵn của Sprite).
+                    //   hpBarBg: nền tối, kích thước CỐ ĐỊNH — luôn full chiều rộng, đóng vai trò
+                    //            "khung viền" phía sau thanh máu.
+                    //   hpBarFill: thanh máu thật, co giãn theo % HP còn lại (xem updateHpBarVisual).
+                    //              Sprite co giãn quanh TÂM (không phải từ 1 cạnh) nên phải dịch
+                    //              position.x bù lại phần bị "ăn vào" từ bên phải khi scale nhỏ đi —
+                    //              xem công thức trong updateHpBarVisual().
+                    const hpBarWidth = this.isLarge ? 1.4 : 1.0;
+                    const hpBarY = this.height * 0.75 + 0.35; // Phía trên đỉnh slime 1 khoảng vừa đủ
+
+                    const hpBarBgMat = new THREE.SpriteMaterial({ color: 0x1a1a2e, transparent: true, opacity: 0.85, depthTest: false });
+                    this.hpBarBg = new THREE.Sprite(hpBarBgMat);
+                    this.hpBarBg.scale.set(hpBarWidth, 0.14, 1);
+                    this.hpBarBg.position.set(0, hpBarY, 0);
+                    this.hpBarBg.renderOrder = 998;
+                    this.mesh.add(this.hpBarBg);
+
+                    const hpBarFillMat = new THREE.SpriteMaterial({ color: 0x4ade80, transparent: true, opacity: 1.0, depthTest: false });
+                    this.hpBarFill = new THREE.Sprite(hpBarFillMat);
+                    this.hpBarFill.scale.set(hpBarWidth, 0.1, 1);
+                    this.hpBarFill.position.set(0, hpBarY, 0.001); // Lệch Z nhẹ để không z-fighting với nền
+                    this.hpBarFill.renderOrder = 999;
+                    this.mesh.add(this.hpBarFill);
+                    this.hpBarMaxWidth = hpBarWidth;
+
+                    // Ẩn mặc định — chỉ hiện khi bị đánh hoặc player ở gần (xem update()), đúng hành
+                    // vi HP Bar thông thường (không che khuất tầm nhìn khi enemy còn nguyên vẹn/ở xa).
+                    this.hpBarBg.visible = false;
+                    this.hpBarFill.visible = false;
+
                     this.alignToGround();
                 }
+
+                // Cập nhật độ dài thanh máu theo % HP hiện tại — gọi mỗi khi HP thay đổi (takeDamage)
+                // và mỗi frame trong update() để phòng trường hợp khác làm đổi this.hp trực tiếp.
+                updateHpBarVisual() {
+                    const pct = Math.max(0, Math.min(1, this.stats.hp / this.stats.maxHp));
+                    this.hpBarFill.scale.x = this.hpBarMaxWidth * pct;
+                    // Sprite co giãn quanh TÂM — khi scale.x giảm, cạnh TRÁI và PHẢI đều thu vào đều
+                    // nhau. Muốn thanh máu "vơi từ bên phải" (giống mọi HP bar chuẩn, đầy bên trái)
+                    // phải dịch tâm sang trái đúng 1 nửa phần đã mất, để cạnh TRÁI của thanh máu luôn
+                    // cố định tại đúng cạnh trái của khung nền.
+                    const missingWidth = this.hpBarMaxWidth * (1 - pct);
+                    this.hpBarFill.position.x = -missingWidth / 2;
+                    // Đổi màu theo % HP còn lại — xanh (an toàn) -> vàng (cảnh báo) -> đỏ (nguy hiểm),
+                    // giúp người chơi ước lượng nhanh mà không cần đọc số chính xác.
+                    if (pct > 0.5) this.hpBarFill.material.color.setHex(0x4ade80);
+                    else if (pct > 0.25) this.hpBarFill.material.color.setHex(0xfbbf24);
+                    else this.hpBarFill.material.color.setHex(0xef4444);
+                }
+
+                // hp/maxHp đọc/ghi xuyên qua this.stats.hp/maxHp — giữ tương thích với mọi code cũ
+                // đang dùng "slime.hp -= x" / "slime.hp <= 0" trực tiếp.
+                get hp() { return this.stats.hp; }
+                set hp(v) { this.stats.hp = v; }
+                get maxHp() { return this.stats.maxHp; }
+                set maxHp(v) { this.stats.maxHp = v; }
 
                 alignToGround() {
                     this.position.y = this.getGroundY() + (this.height / 2);
@@ -247,14 +325,50 @@
                     return bestGroundY;
                 }
 
-                takeDamage(amount, direction, isHydro) {
-                    this.hp -= amount; this.flashTimer = 0.18;
+                // Pre-Alpha v0.7 — Core Stats: `multiplier` (KHÔNG còn là "damage đã tính sẵn" như
+                // trước) — hệ số riêng theo loại đòn đánh của player (player.attack.melee/plunge/
+                // burst/hydroProjectile, xem game.js). Final Damage được tính DUY NHẤT tại đây qua
+                // calculateFinalDamage(), theo đúng Combat Flow chuẩn hóa (core_stats.md mục 5):
+                // lấy ATK người tấn công -> lấy DEF mục tiêu -> tính Final Damage -> trừ HP -> hiển thị
+                // Damage Number -> cập nhật HP Bar -> (nếu chết) animation/drop/EXP.
+                // Attacker LUÔN là player ở v0.7 (chưa có nguồn sát thương nào khác nhắm vào Enemy).
+                // Pre-Alpha v0.7 — Core Stats: Combat Flow chuẩn hóa theo ĐÚNG 8 bước quy định ở
+                // core_stats.md mục 5 (đánh số rõ ràng dưới đây để dễ chèn thêm Critical Hit/Buff/
+                // Debuff/Elemental Damage/Elemental Reaction/Shield/Healing vào ĐÚNG bước tương ứng
+                // trong tương lai, thay vì phải dò lại toàn bộ hàm). `multiplier` là hệ số riêng theo
+                // loại đòn của player (KHÔNG phải damage tuyệt đối) — xem giải thích ở game.js.
+                takeDamage(multiplier, direction, isHydro) {
+                    // Bước 1: người tấn công gây sát thương — LUÔN là player ở v0.7 (chưa có nguồn sát
+                    // thương nào khác nhắm vào Enemy).
+                    const player = window.player;
+                    // Bước 2+3: lấy ATK người tấn công (player.stats.atk) + DEF mục tiêu (this.stats.def).
+                    // Bước 4: tính Final Damage theo công thức chuẩn.
+                    const finalDamage = window.calculateFinalDamage(player.stats.atk, this.stats.def, multiplier);
+                    // Bước 5: trừ HP mục tiêu (Math.max(0, ...) đảm bảo không bao giờ xuống âm).
+                    this.hp = Math.max(0, this.hp - finalDamage);
+
+                    // Bước 6: hiển thị Damage Number (v0.7 mục 3) — bay lên phía trên đầu slime, màu
+                    // trắng duy nhất, không phân biệt chí mạng/nguyên tố ở phiên bản này.
+                    if (window.spawnDamageNumber) {
+                        const numberOrigin = this.position.clone();
+                        numberOrigin.y += this.height * 0.6;
+                        window.spawnDamageNumber(numberOrigin, finalDamage);
+                    }
+
+                    // Bước 7: cập nhật thanh HP (v0.7 mục 4) — hiện ngay khi bị đánh, tự đếm ngược ẩn
+                    // lại sau KHOẢNG LẶNG không có gì xảy ra (xem hpBarVisibleTimer trong update()).
+                    this.updateHpBarVisual();
+                    this.hpBarVisibleTimer = 3.0;
+
+                    // --- Hiệu ứng phụ không thuộc 8 bước chuẩn hóa (flash trắng, knockback) — giữ
+                    // nguyên hành vi combat feel đã có từ trước v0.7, không phải 1 phần Core Stats. ---
+                    this.flashTimer = 0.18;
                     this.bodyMesh.material = isHydro ? this.hydroFlashMaterial : this.flashMaterial;
                     const force = this.isLarge ? window.COMBAT_FEEL_CONFIG.enemyRecoilForce.large : window.COMBAT_FEEL_CONFIG.enemyRecoilForce.normal;
                     this.knockback.copy(direction).normalize().multiplyScalar(force);
 
-                    // --- BÁO ĐỘNG ĐỒNG ĐỘI CÙNG CAMP ---
-                    // Chạy TRƯỚC nhánh return-khi-chết bên dưới — 1 đòn đánh dù có hạ gục slime này
+                    // --- BÁO ĐỘNG ĐỒNG ĐỘI CÙNG CAMP (không thuộc 8 bước chuẩn hóa — hành vi AI) ---
+                    // Chạy TRƯỚC bước 8 (kiểm tra chết) bên dưới — 1 đòn đánh dù có hạ gục slime này
                     // hay không thì đồng đội cùng camp vẫn phải biết. Các slime khác CÙNG CAMP
                     // (this.camp, gán bởi createCamps() trong game.js) lập tức bị alerted — NHƯNG chỉ
                     // nếu khoảng cách của TỪNG con đó tới player không lớn hơn 35 (khác với khoảng
@@ -262,7 +376,6 @@
                     // có thể đứng rải rác quanh camp, không phải tất cả đều gần player như con vừa
                     // trúng đòn). Dùng window.player/window.enemies trực tiếp — nhất quán với cách
                     // các hàm khác trong file này truy cập state toàn cục.
-                    const player = window.player;
                     if (this.camp !== undefined && player) {
                         const ALLY_ALERT_RADIUS = 35;
                         window.enemies.forEach(e => {
@@ -275,12 +388,11 @@
                         });
                     }
 
+                    // Bước 8: nếu HP <= 0 -> animation chết + rơi vật phẩm + cộng EXP.
                     if (this.hp <= 0) {
-                        this.alive = false; this.respawnTimer = 0.2; this.mesh.visible = false;
-                        if (window.onEnemyKilled) window.onEnemyKilled('slime');
-                        // v0.6 Wilderness: Slime Drop (nguyên liệu) + EXP — tách riêng khỏi
-                        // onEnemyKilled() (chỉ lo cập nhật tiến độ quest 'kill'), xem onSlimeKilled()
-                        // trong game.js để biết chi tiết bảng vật phẩm rơi/EXP.
+                        this.alive = false; this.respawnTimer = 0.2; this.mesh.visible = false; // animation chết (ẩn mesh)
+                        if (window.onEnemyKilled) window.onEnemyKilled('slime'); // cập nhật tiến độ quest 'kill'
+                        // Rơi vật phẩm (nguyên liệu) + cộng EXP — xem onSlimeKilled() trong game.js.
                         if (window.onSlimeKilled) window.onSlimeKilled(this);
                         return;
                     }
@@ -313,6 +425,23 @@
                     const playerIsTargetable = !player.isDead;
 
                     const distToPlayer = this.position.distanceTo(player.position);
+
+                    // --- ENEMY HP BAR: hiện/ẩn (v0.7) ---
+                    // Hiện khi (a) vừa bị đánh gần đây (hpBarVisibleTimer > 0, set = 3.0 trong
+                    // takeDamage() mỗi lần trúng đòn) HOẶC (b) player đang ở đủ gần để nhìn rõ (dùng
+                    // ngưỡng nhỏ hơn detectRadius một chút — tránh HP bar bật lên từ khoảng cách quá
+                    // xa, gây rối mắt khi có nhiều slime rải rác trong tầm nhìn). Tắt đếm ngược khi
+                    // player đang ở gần — không cần "hết giờ" trong lúc player còn đứng cạnh nhìn.
+                    const HP_BAR_NEARBY_RADIUS = 8.0;
+                    const isNearbyForHpBar = distToPlayer <= HP_BAR_NEARBY_RADIUS;
+                    if (!isNearbyForHpBar && this.hpBarVisibleTimer > 0) {
+                        this.hpBarVisibleTimer -= dt;
+                    }
+                    const shouldShowHpBar = this.alive && (isNearbyForHpBar || this.hpBarVisibleTimer > 0);
+                    if (this.hpBarBg.visible !== shouldShowHpBar) {
+                        this.hpBarBg.visible = shouldShowHpBar;
+                        this.hpBarFill.visible = shouldShowHpBar;
+                    }
 
                     if (this.isGrounded) {
                         const currentGroundY = this.getGroundY();
@@ -442,11 +571,22 @@
                             const distNow = this.position.distanceTo(player.position);
                             if (distNow <= this.attackHitRange && player.invulnTimer <= 0) {
                                 this.player_hasBeenHitThisAttack = true;
-                                // Random sát thương ngay tại thời điểm gây damage (mỗi lần tấn công
-                                // trúng đều random lại), thay vì cố định một lần lúc spawn slime.
-                                const dmg = Math.floor(Math.random() * (this.maxAttackDamage - this.minAttackDamage + 1)) + this.minAttackDamage;
+                                // Pre-Alpha v0.7 — Core Stats: Final Damage tính qua calculateFinalDamage()
+                                // (ATK của Slime, DEF của player), KHÔNG còn random thô theo khoảng
+                                // minAttackDamage/maxAttackDamage như trước v0.7. multiplier=1 vì Slime
+                                // chỉ có 1 loại đòn tấn công (không có hệ số riêng theo loại đòn như
+                                // player.attack.melee/plunge/burst/hydroProjectile).
+                                const dmg = window.calculateFinalDamage(this.stats.atk, player.stats.def);
                                 player.hp = Math.max(0, player.hp - dmg); player.invulnTimer = 0.8;
                                 window.triggerDamageFlash(); sfx.playHit();
+                                // Damage Number khi PLAYER nhận sát thương (v0.7 mục 3) — cùng hàm
+                                // dùng cho Enemy, chỉ khác điểm xuất phát (trên đầu player thay vì
+                                // enemy).
+                                if (window.spawnDamageNumber) {
+                                    const numberOrigin = player.position.clone();
+                                    numberOrigin.y += player.height * 0.75;
+                                    window.spawnDamageNumber(numberOrigin, dmg);
+                                }
                                 cameraState.shakeTimer = 0.25; cameraState.shakeIntensity = 0.35;
                                 // Stagger nhẹ ~0.1s: chỉ là hiệu ứng knockback nhẹ, không khóa input người chơi
                                 const pushDir = new THREE.Vector3().subVectors(player.position, this.position); pushDir.y = 0;
