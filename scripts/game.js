@@ -3218,7 +3218,7 @@
                 if (isGamePaused || window.isDialogueOpen || player.isDrowning || player.isDead) return;
 
                 const k = e.key.toLowerCase();
-                if (k === 'w' || e.key === 'ArrowUp') keys.w = true;
+                if (k === 'w' || k === "ư"|| e.key === 'ArrowUp') keys.w = true;
                 if (k === 's' || e.key === 'ArrowDown') keys.s = true;
                 if (k === 'a' || e.key === 'ArrowLeft') keys.a = true;
                 if (k === 'd' || e.key === 'ArrowRight') keys.d = true;
