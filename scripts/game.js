@@ -1225,9 +1225,9 @@
                 jumpRequested: false,
 
                 speed: 7.2,           
-                sprintSpeed: 12.5,    
+                sprintSpeed: 14.0,    
                 walkSpeed: 3.8  ,       
-                acceleration: 42.0,   
+                acceleration: 45.0,   
                 deceleration: 18.0,   
                 jumpForce: 12.5,      
                 gravity: 38,         
@@ -1250,7 +1250,7 @@
                 dashDirection: new THREE.Vector3(), lastMovementDirection: new THREE.Vector3(0, 0, 1), 
                 dashSpeed: 28.0,        
                 dashDuration: 0.2,    
-                dashCooldown: 0.8,     
+                dashCooldown: 0.4,     
                 ghostSpawnTimer: 0     
             };
 
@@ -1437,7 +1437,7 @@
                 pressureShot: {
                     damage: 2, // Hệ số nhân với player.attack.hydroProjectile
                     maxRange: 24,
-                    beamRadius: 0.2,
+                    beamRadius: 0.4,
                     fadeDuration: 0.3,
                     recoilDistance: 1.2, // Quãng đường (m) nhân vật bị đẩy lùi sau khi bắn — nhỏ, chỉ
                                           // tăng cảm giác lực, không làm mất kiểm soát nhân vật.
