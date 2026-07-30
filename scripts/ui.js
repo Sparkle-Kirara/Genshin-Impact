@@ -192,6 +192,21 @@ function togglePauseMenu(forceState) {
 window.togglePauseMenu = togglePauseMenu;
 
 // ============================================================
+// SAVE SYSTEM — RESET CONFIRMATION UI (Infrastructure Update #1, mục 4)
+// ============================================================
+// Chỉ quản lý việc HIỆN/ẨN overlay xác nhận — hành động xoá dữ liệu thực sự (localStorage.removeItem
+// + reload trang) nằm trong window.resetSaveData() (game.js), gọi trực tiếp từ nút "Xoá dữ liệu"
+// trong HTML (không qua hàm trung gian ở đây, vì không cần xử lý gì thêm trước khi gọi).
+window.confirmResetSaveData = function () {
+    const overlay = document.getElementById('reset-save-confirm-overlay');
+    if (overlay) overlay.classList.remove('hidden');
+};
+window.closeResetSaveDataConfirm = function () {
+    const overlay = document.getElementById('reset-save-confirm-overlay');
+    if (overlay) overlay.classList.add('hidden');
+};
+
+// ============================================================
 // BURST UI (Energy water-fill display)
 // ============================================================
 function updateBurstUI() {
@@ -524,6 +539,14 @@ function syncHUDVariables() {
     }
     if (hpText) hpText.textContent = `${Math.ceil(player.hp)} / ${player.maxHp}`;
 
+    // Pre-Alpha v0.8 (Character) — cập nhật real-time Character Screen NẾU đang mở đúng tab đó (mục 3
+    // spec: "cập nhật theo thời gian thực"). Chỉ vẽ lại khi thực sự đang mở (activeWindow ===
+    // 'character') để tránh lãng phí thao tác DOM mỗi frame lúc màn hình đang đóng — cùng cách tối ưu
+    // đã áp dụng cho renderInventoryGrid() ở onInventoryItemAdded().
+    if (window.activeWindow === 'character' && window.renderCharacterScreen) {
+        window.renderCharacterScreen();
+    }
+
     const staminaStateTag = document.getElementById('stamina-state-tag');
     if (staminaStateTag) {
         staminaStateTag.textContent = `${Math.floor(player.stamina)} / ${player.maxStamina}`;
@@ -633,6 +656,29 @@ window.initDesktopButtons = function () {
 };
 
 window.syncHUDVariables = syncHUDVariables;
+
+// ============================================================
+// PARTY SWITCH TẠM THỜI (Pre-Alpha v0.8.5, Bước 1)
+// ============================================================
+// initPartySwitchTemp(): render 1 hàng nút tối giản (chưa style theo Character HUD thật) vào
+// #party-switch-temp (index.html) — mỗi nút ứng với 1 slot CÓ Character trong window.partyState (bỏ
+// qua slot Reserved null). Bấm nút gọi thẳng window.switchToCharacter(index). CHỈ để test trên mobile
+// trong lúc Bước 2-3 chưa xây Character HUD/hiệu ứng chuyển thật — khối này sẽ bị THAY THẾ hoàn toàn
+// (không phải mở rộng thêm) khi làm Character HUD.
+window.initPartySwitchTemp = function () {
+    const container = document.getElementById('party-switch-temp');
+    if (!container || !window.partyState) return;
+
+    container.innerHTML = '';
+    window.partyState.forEach((member, index) => {
+        if (!member) return; // Slot Reserved — chưa có Character
+        const btn = document.createElement('button');
+        btn.className = 'w-14 h-14 rounded-full bg-stone-850/90 border-2 border-stone-700/60 text-white text-[10px] font-bold flex items-center justify-center shadow-lg select-none';
+        btn.textContent = member.name;
+        btn.addEventListener('click', () => { window.switchToCharacter(index); });
+        container.appendChild(btn);
+    });
+};
 
 // ============================================================
 // HỆ THỐNG TƯƠNG TÁC & NHIỆM VỤ (QUEST UI)
@@ -1020,6 +1066,131 @@ window.clearInventoryDetail = function () {
     document.getElementById('inventory-detail-content')?.classList.remove('flex');
     document.getElementById('inventory-detail-empty')?.classList.remove('hidden');
     window.updateInventorySlotHighlight(null); // null -> không có slot nào khớp -> gỡ hết highlight
+};
+
+// ============================================================
+// CHARACTER UI (Pre-Alpha v0.8)
+// ============================================================
+// Đọc dữ liệu từ window.CHARACTER_DATA / window.LEVEL_CONFIG / window.player (game.js) — file này
+// (Engine/UI, tầng 3 trong kiến trúc 3-layer, cùng pattern với Inventory/Quest) hoàn toàn không biết
+// công thức level/EXP tính thế nào, chỉ biết cách VẼ ra DOM từ dữ liệu được cung cấp.
+
+// Vẽ lại toàn bộ Character Screen — gọi mỗi lần mở tab Character (openMenuSubSection('character'))
+// để đảm bảo luôn khớp state mới nhất, và cũng được gọi lại bởi checkLevelUp() (game.js) + syncHUDVariables()
+// (ngay dưới) để cập nhật real-time nếu màn hình đang mở lúc HP đổi (mục 3 spec: "cập nhật theo thời
+// gian thực khi nhân vật tăng cấp hoặc thay đổi dữ liệu").
+window.renderCharacterScreen = function () {
+    if (!window.CHARACTER_DATA || !window.player) return;
+    const data = window.CHARACTER_DATA;
+    const p = window.player;
+
+    const nameEl = document.getElementById('character-name');
+    if (nameEl) nameEl.textContent = data.name;
+
+    const regionEl = document.getElementById('character-region');
+    if (regionEl) regionEl.textContent = data.region || '';
+
+    const elementEl = document.getElementById('character-element');
+    if (elementEl) elementEl.textContent = data.element;
+
+    const levelEl = document.getElementById('character-level');
+    if (levelEl) levelEl.textContent = p.level || 1;
+
+    // Thanh EXP — dùng window.LEVEL_CONFIG.expForLevel() (game.js) để biết ngưỡng EXP cần cho level
+    // hiện tại, KHÔNG tự tính công thức riêng ở đây (UI không biết gì về cách tính, chỉ hiển thị).
+    const expFill = document.getElementById('character-exp-fill');
+    const expText = document.getElementById('character-exp-text');
+    if (window.LEVEL_CONFIG) {
+        const needed = window.LEVEL_CONFIG.expForLevel(p.level || 1);
+        const current = p.exp || 0;
+        const ratio = needed > 0 ? Math.max(0, Math.min(1, current / needed)) : 0;
+        if (expFill) expFill.style.width = (ratio * 100) + '%';
+        if (expText) expText.textContent = `${Math.floor(current)} / ${needed}`;
+    }
+
+    // Attributes — đọc TRỰC TIẾP từ player.hp/maxHp/stats (cùng nguồn dữ liệu HUD thanh máu chính
+    // dùng, xem syncHUDVariables()) để không bao giờ lệch giữa 2 nơi hiển thị HP.
+    const hpFill = document.getElementById('character-hp-fill');
+    const hpText = document.getElementById('character-hp-text');
+    if (hpFill) {
+        const hpRatio = Math.max(0, Math.min(1, p.hp / p.maxHp));
+        hpFill.style.width = (hpRatio * 100) + '%';
+        hpFill.classList.remove('bg-emerald-600', 'bg-amber-500', 'bg-red-600');
+        if (hpRatio > 0.5) hpFill.classList.add('bg-emerald-600');
+        else if (hpRatio > 0.25) hpFill.classList.add('bg-amber-500');
+        else hpFill.classList.add('bg-red-600');
+    }
+    if (hpText) hpText.textContent = `${Math.ceil(p.hp)} / ${p.maxHp}`;
+
+    const atkText = document.getElementById('character-atk-text');
+    if (atkText) atkText.textContent = p.stats.atk;
+
+    const defText = document.getElementById('character-def-text');
+    if (defText) defText.textContent = p.stats.def;
+};
+
+// ============================================================
+// PLAYER NAME PROMPT (Pre-Alpha v0.8 — UI adjustment)
+// ============================================================
+// Hiện ĐÚNG 1 LẦN lúc bắt đầu hành trình mới (initThree() gọi khi loadGameData() trả về null — xem
+// 04-scene-init.js). Dùng chung togglePauseMenu(true) để khoá input/pointer lock giống hệt lúc mở
+// Pause Menu bình thường — tránh người chơi vẫn di chuyển/điều khiển được trong lúc modal đang che
+// màn hình. KHÔNG dùng window.confirm()/prompt() (native browser dialog) vì spec yêu cầu giao diện
+// riêng theo phong cách game (2 nút Xác nhận/Hủy, style nhất quán với các popup khác).
+window.showPlayerNamePrompt = function () {
+    const overlay = document.getElementById('player-name-prompt-overlay');
+    const input = document.getElementById('player-name-prompt-input');
+    if (!overlay) return;
+
+    if (!window.isGamePaused) window.togglePauseMenu(true);
+    overlay.classList.remove('hidden');
+    overlay.classList.add('flex');
+    if (input) {
+        input.value = '';
+        // Focus sau 1 frame — tránh trường hợp overlay vừa hiện (transition) chưa nhận input ngay.
+        requestAnimationFrame(() => input.focus());
+    }
+};
+
+window.closePlayerNamePrompt = function () {
+    const overlay = document.getElementById('player-name-prompt-overlay');
+    if (overlay) {
+        overlay.classList.add('hidden');
+        overlay.classList.remove('flex');
+    }
+    if (window.isGamePaused) window.togglePauseMenu(false);
+};
+
+// Xác nhận: tên vừa nhập (trim khoảng trắng thừa) — nếu rỗng sau khi trim, coi như Hủy (fallback
+// 'Traveler', xử lý ngay trong setCharacterName() ở game.js, không cần kiểm tra riêng ở đây).
+window.confirmPlayerNamePrompt = function () {
+    const input = document.getElementById('player-name-prompt-input');
+    const name = input ? input.value : '';
+    if (window.setCharacterName) window.setCharacterName(name);
+    if (window.requestSave) window.requestSave(); // Lưu ngay — mục 2: "dữ liệu... sẽ lưu vào data"
+    window.closePlayerNamePrompt();
+};
+
+// Hủy: tên mặc định 'Traveler' (setCharacterName() tự fallback khi truyền chuỗi rỗng).
+window.cancelPlayerNamePrompt = function () {
+    if (window.setCharacterName) window.setCharacterName('');
+    if (window.requestSave) window.requestSave();
+    window.closePlayerNamePrompt();
+};
+
+// Phím tắt mở Character Screen từ icon trên HUD (mục 1, cách 1 trong character.md) — cùng pattern với
+// openInventoryQuick(): mở Pause Menu trước (nếu chưa mở) rồi nhảy thẳng tới tab Character, thay vì
+// người chơi phải tự mở Paimon Menu rồi bấm vào ô Character theo cách 2.
+window.openCharacterQuick = function () {
+    if (window.isDialogueOpen) return; // Không mở đè lên Dialogue đang mở
+    if (!window.isGamePaused) {
+        window.togglePauseMenu(true);
+    }
+    // Đợi 1 frame để togglePauseMenu() kịp hiện #game-menu (transition), tránh openMenuSubSection()
+    // thao tác trên phần tử vẫn còn pointer-events-none.
+    requestAnimationFrame(() => {
+        if (window.openMenuSubSection) window.openMenuSubSection('character');
+    });
 };
 
 // Phím tắt mở Inventory từ icon Backpack trên HUD (mục 1, cách 2 trong đề bài) — mở PAUSE MENU trước

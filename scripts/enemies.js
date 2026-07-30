@@ -180,21 +180,21 @@
                         this.speed = 2.0; this.chaseSpeed = 4.2;
                         this.detectRadius = 15.0; this.loseRadius = 30.0; this.chaseCooldown = 0.6; this.jumpPowerY = 9.0;
                         // --- CORE STATS (v0.7) — số liệu Large Slime theo core_stats.md mục 7.
-                        this.stats = { maxHp: 180, hp: 180, atk: 20, def: 10 };
+                        this.stats = { maxHp: 320, hp: 320, atk: 20, def: 12 };
                         this.expReward = 30; // dùng bởi onSlimeKilled() (game.js) khi tính EXP rơi ra
-                        this.attackRange = 2.0; // khoảng cách để bắt đầu chuẩn bị tấn công
+                        this.attackRange = 2.2; // khoảng cách để bắt đầu chuẩn bị tấn công
                         this.attackTelegraphDuration = 0.5; // giây chuẩn bị trước khi lao vào
-                        this.attackHitRange = 2.3; // khoảng cách tối đa để đòn đánh trúng
+                        this.attackHitRange = 2.6; // khoảng cách tối đa để đòn đánh trúng
                     } else {
                         this.isLarge = false; this.width = 1.6; this.height = 0.8; this.depth = 1.6;
                         this.speed = 3.5; this.chaseSpeed = 7.0; 
                         this.detectRadius = 15.0; this.loseRadius = 30.0; this.chaseCooldown = 0.35; this.jumpPowerY = 7.2;
                         // --- CORE STATS (v0.7) — số liệu Small Slime theo core_stats.md mục 7.
-                        this.stats = { maxHp: 80, hp: 80, atk: 12, def: 5 };
+                        this.stats = { maxHp: 150, hp: 150, atk: 12, def: 5 };
                         this.expReward = 10;
-                        this.attackRange = 1.6;
-                        this.attackTelegraphDuration = 0.4;
-                        this.attackHitRange = 1.8;
+                        this.attackRange = 1.8;
+                        this.attackTelegraphDuration = 0.35;
+                        this.attackHitRange = 2.2;
                     }
                     this.attackTargetPos = new THREE.Vector3(); // vị trí player được "khóa" lúc bắt đầu chuẩn bị
                     this.player_hasBeenHitThisAttack = false; // tránh gây damage nhiều lần trong 1 lần lao

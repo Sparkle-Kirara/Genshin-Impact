@@ -147,7 +147,7 @@
             }
 
             let skillCooldownTimer = 0.0;
-            const SKILL_COOLDOWN_DURATION = 5.0;
+            const SKILL_COOLDOWN_DURATION = 7.0;
 
             // Kiểm tra điều kiện tiên quyết chung để dùng Elemental Skill (giữ nguyên hành vi cũ).
             function canUseElementalSkill() {
@@ -381,7 +381,7 @@
                         enemy.hydroSquashTimer = 0.18;
                     }
                     player.skillHitCount++;
-                    if (player.skillHitCount >= 3) {
+                    if (player.skillHitCount >= 6) {
                         player.skillHitCount = 0;
                         spawnEnergyParticles(enemy.position);
                     }

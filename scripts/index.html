@@ -1,0 +1,1727 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Genshin Impact Pre-Alpha v0.3 - Genisis</title>
+    <!-- Tailwind CSS cho giao diện hiện đại -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Thư viện Three.js chuẩn -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Font Awesome cho icon -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style/style.css">
+    <link rel="icon" type="png" href="assets/icon/Genshin_Impact.png">
+</head>
+<body>
+    <!-- CONTAINER CHỨA CANVAS GAME 3D -->
+    <div id="canvas-container" class="w-full h-full absolute inset-0 z-0"></div>
+
+    <!-- NÚT MỞ MENU PAIMON STAR (GUIDING STAR) -->
+    <button id="paimon-star-btn" class="absolute top-4 left-4 z-40 w-12 h-12 rounded-full flex items-center justify-center bg-[#110f1e]/85 border border-[#ebdcb9]/40 text-[#ebdcb9] shadow-[0_4px_12px_rgba(0,0,0,0.5)] transition-all duration-300 hover:border-[#ebdcb9] hover:text-[#fff4db] hover:shadow-[0_0_15px_rgba(235,220,185,0.4)] pointer-events-auto active:scale-95">
+        <span class="text-xl animate-star-glow select-none">✦</span>
+        <!-- Hệ thống chấm đỏ thông báo (Chuẩn bị sẵn, mặc định ẩn 'hidden') -->
+        <span id="paimon-star-badge" class="absolute top-2.5 right-2.5 w-2.5 h-2.5 bg-red-500 rounded-full border border-[#110f1e] hidden animate-pulse shadow-[0_0_6px_#ef4444]"></span>
+    </button>
+
+    <!-- HBOX: NÚT PHÍM TẮT INVENTORY + CHARACTER (Pre-Alpha v0.8) — góc trên phải HUD, xếp hàng
+         ngang (HBoxContainer), Character ở BÊN PHẢI Inventory. Kích cỡ mỗi nút giảm còn ~80% so với
+         kích thước gốc (w-12/h-12 = 3rem -> w-10/h-10 = 2.5rem) theo yêu cầu điều chỉnh UI. Dùng
+         chung window.openInventoryQuick()/window.openCharacterQuick() (ui.js) để hành vi mở menu nhất
+         quán với việc mở từ Paimon Menu. -->
+    <div class="absolute top-4 right-4 z-40 flex flex-row gap-2 pointer-events-none">
+        <button id="backpack-btn" onclick="openInventoryQuick()" class="w-10 h-10 rounded-full flex items-center justify-center bg-[#110f1e]/85 border border-[#ebdcb9]/40 text-[#ebdcb9] shadow-[0_4px_12px_rgba(0,0,0,0.5)] transition-all duration-300 hover:border-[#ebdcb9] hover:text-[#fff4db] hover:shadow-[0_0_15px_rgba(235,220,185,0.4)] pointer-events-auto active:scale-95">
+            <i class="fa-solid fa-briefcase text-base select-none"></i>
+        </button>
+        <button id="character-btn" onclick="openCharacterQuick()" class="w-10 h-10 rounded-full flex items-center justify-center bg-[#110f1e]/85 border border-[#ebdcb9]/40 text-[#ebdcb9] shadow-[0_4px_12px_rgba(0,0,0,0.5)] transition-all duration-300 hover:border-[#ebdcb9] hover:text-[#fff4db] hover:shadow-[0_0_15px_rgba(235,220,185,0.4)] pointer-events-auto active:scale-95">
+            <i class="fa-solid fa-user text-base select-none"></i>
+        </button>
+    </div>
+
+    <!-- HIỆU ỨNG NHÁY ĐỎ KHI NHẬN SÁT THƯƠNG -->
+    <div id="damage-flash" class="absolute inset-0 bg-red-600/30 opacity-0 pointer-events-none transition-opacity duration-100 z-50"></div>
+
+    <!-- HIỆU ỨNG FLASH HYDRO KHI TRÚNG ĐỊA -->
+    <div id="hydro-flash" class="absolute inset-0 pointer-events-none z-48 opacity-0" style="background: radial-gradient(ellipse at center, rgba(34,211,238,0.18) 0%, rgba(6,182,212,0.06) 60%, transparent 100%);"></div>
+
+    <!-- CROSSHAIR / AIM UI CHO ELEMENTAL SKILL (HOLD MODE) -->
+    <!-- Ẩn mặc định (opacity-0 + scale nhỏ), chỉ hiện khi skillAimState.phase === 'aiming' qua
+         window.setSkillAimUIVisible() (ui.js). Bắt buộc phải chính giữa màn hình),
+         còn nhân vật lệch sang trái (đứng giữa/lệch trái theo camera third-person) che khuất tầm ngắm. -->
+    <div id="skill-aim-crosshair" class="absolute inset-0 flex items-center justify-center pointer-events-none z-40 opacity-0 scale-75 transition-all duration-150">
+        <div class="relative w-14 h-14">
+            <div class="absolute inset-0 rounded-full border-2 border-cyan-300/70" style="box-shadow: 0 0 12px rgba(34,211,238,0.5);"></div>
+            <div class="absolute top-1/2 left-1/2 w-1.5 h-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-200" style="box-shadow: 0 0 8px rgba(103,232,249,0.9);"></div>
+            <div class="absolute top-0 left-1/2 w-0.5 h-2.5 -translate-x-1/2 bg-cyan-300/80"></div>
+            <div class="absolute bottom-0 left-1/2 w-0.5 h-2.5 -translate-x-1/2 bg-cyan-300/80"></div>
+            <div class="absolute left-0 top-1/2 h-0.5 w-2.5 -translate-y-1/2 bg-cyan-300/80"></div>
+            <div class="absolute right-0 top-1/2 h-0.5 w-2.5 -translate-y-1/2 bg-cyan-300/80"></div>
+        </div>
+    </div>
+
+    <!-- HIỆU ỨNG ĐUỐI NƯỚC (DROWN FADE SCREEN) -->
+    <!-- MÀN HÌNH TỬ VONG (DEATH SCREEN) — style Genshin Impact -->
+    <div id="death-screen" class="absolute inset-0 bg-black opacity-0 pointer-events-none z-50 flex flex-col items-center justify-center transition-opacity" style="transition-duration: 1000ms;">
+        <div class="text-center px-6">
+            <h1 id="death-screen-title" class="text-white font-bold text-4xl tracking-wide mb-3">Defeated</h1>
+
+            <!-- Divider mỏng màu đỏ thẫm với notch hình kim cương ở giữa -->
+            <div class="relative flex items-center justify-center w-64 mx-auto mb-3">
+                <div class="h-px bg-red-800 w-full"></div>
+                <div class="absolute w-2 h-2 bg-red-700 rotate-45"></div>
+            </div>
+
+            <p id="death-screen-subtext" class="text-red-500 text-sm font-medium max-w-md mx-auto"></p>
+        </div>
+
+        <!-- Nút Revive kiểu controller prompt (chấm tròn xanh + chữ O trắng) -->
+        <button id="death-screen-revive-btn" class="absolute bottom-16 flex items-center gap-2 pointer-events-auto">
+            <span class="flex items-center justify-center w-7 h-7 rounded-full bg-blue-600 border border-blue-300/50">
+                <span class="text-white font-bold text-xs">O</span>
+            </span>
+            <span class="text-white text-sm font-semibold tracking-wide">Revive</span>
+        </button>
+    </div>
+
+    <!-- VÒNG TRÒN THỂ LỰC DI ĐỘNG (GENSHIN-STYLE STAMINA WHEEL) -->
+    <div id="stamina-container" class="absolute pointer-events-none z-30 transition-opacity duration-200 opacity-0" style="transform: translate(35px, -20px);">
+        <svg class="w-10 h-10 transform -rotate-90" viewBox="0 0 36 36">
+            <!-- Vòng nền sẫm -->
+            <path class="text-stone-900/60" stroke="currentColor" stroke-width="4.5" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            <!-- Vòng tiến độ thể lực màu vàng hổ phách -->
+            <path id="stamina-ring" class="text-amber-400 transition-all duration-75" stroke="currentColor" stroke-dasharray="100, 100" stroke-width="4.5" stroke-linecap="round" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+        </svg>
+    </div>
+
+    <!-- DESKTOP HINT CHO LEO TRÈO -->
+    <div id="desktop-climb-hint" class="absolute bottom-[20%] left-1/2 -translate-x-1/2 z-30 text-white bg-slate-900/80 px-6 py-2 rounded-full font-bold text-sm tracking-widest hidden border border-slate-700 shadow-xl pointer-events-none transition-opacity">
+        <span class="text-cyan-400">[X]</span> DROP
+    </div>
+
+    <!-- HỆ THỐNG MENU OVERLAY (PAIMON-INSPIRED SIDEBAR SYSTEM) -->
+    <div id="game-menu" class="absolute inset-0 z-50 bg-[#0c0a15]/15 opacity-0 pointer-events-none transition-all duration-300 flex">
+        
+        <!-- Back-facing dim clickcatcher to close menu from the right side -->
+        <div id="menu-backdrop-close" class="absolute inset-0 z-10 cursor-pointer"></div>
+
+        <!-- CONSTELLATION & STAR EFFECT LAYER (z-index 5) -->
+        <div class="absolute inset-0 pointer-events-none z-5 overflow-hidden opacity-40">
+            <svg class="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="none">
+                <!-- Constellation Lines -->
+                <path d="M 150 150 L 300 220 L 450 180 L 500 350 L 320 400 Z" stroke="rgba(220, 185, 125, 0.22)" stroke-width="1.2" stroke-dasharray="4 4" fill="none" class="animate-constellation-glow"/>
+                <path d="M 1400 150 L 1550 100 L 1700 200 L 1650 350 L 1450 300 Z" stroke="rgba(220, 185, 125, 0.18)" stroke-width="1.2" stroke-dasharray="4 4" fill="none" class="animate-constellation-glow" style="animation-delay: 1s;"/>
+                <path d="M 200 700 L 320 620 L 450 750 L 350 850 Z" stroke="rgba(220, 185, 125, 0.15)" stroke-width="1" stroke-dasharray="3 3" fill="none" class="animate-constellation-glow" style="animation-delay: 2s;"/>
+                <path d="M 1200 800 L 1350 720 L 1500 850 L 1300 920 Z" stroke="rgba(220, 185, 125, 0.15)" stroke-width="1" stroke-dasharray="3 3" fill="none" class="animate-constellation-glow" style="animation-delay: 3s;"/>
+                
+                <!-- Constellation Nodes -->
+                <circle cx="150" cy="150" r="3.5" fill="#dec89a" class="animate-pulse"/>
+                <circle cx="300" cy="220" r="4.5" fill="#fff" class="animate-pulse" style="animation-delay: 0.5s;"/>
+                <circle cx="450" cy="180" r="3.5" fill="#dec89a" class="animate-pulse" style="animation-delay: 1s;"/>
+                <circle cx="500" cy="350" r="5" fill="#fff4db" class="animate-pulse" style="animation-delay: 1.5s;"/>
+                <circle cx="320" cy="400" r="4" fill="#dec89a" class="animate-pulse" style="animation-delay: 2s;"/>
+                
+                <circle cx="1400" cy="150" r="3.5" fill="#dec89a" class="animate-pulse" style="animation-delay: 0.8s;"/>
+                <circle cx="1550" cy="100" r="4.5" fill="#fff" class="animate-pulse" style="animation-delay: 1.2s;"/>
+                <circle cx="1700" cy="200" r="3.5" fill="#dec89a" class="animate-pulse" style="animation-delay: 1.6s;"/>
+                <circle cx="1650" cy="350" r="5" fill="#fff4db" class="animate-pulse" style="animation-delay: 2s;"/>
+                <circle cx="1450" cy="300" r="4" fill="#dec89a" class="animate-pulse" style="animation-delay: 2.4s;"/>
+            </svg>
+            <div class="absolute top-[10%] left-[20%] w-1.5 h-1.5 bg-[#f7e8cf] rounded-full animate-float-sparkle" style="animation-delay: 0s; --float-duration: 6s; --float-x: 30px; --float-y: -50px;"></div>
+            <div class="absolute top-[40%] left-[60%] w-2 h-2 bg-[#fff] rounded-full animate-float-sparkle" style="animation-delay: 1.5s; --float-duration: 8s; --float-x: -40px; --float-y: -80px;"></div>
+            <div class="absolute top-[70%] left-[35%] w-1 h-1 bg-[#ebdcb9] rounded-full animate-float-sparkle" style="animation-delay: 3s; --float-duration: 7s; --float-x: 50px; --float-y: -60px;"></div>
+            <div class="absolute top-[25%] left-[80%] w-2 h-2 bg-[#6EC6FF] rounded-full animate-float-sparkle" style="animation-delay: 0.8s; --float-duration: 9s; --float-x: -30px; --float-y: -40px;"></div>
+            <div class="absolute top-[80%] left-[75%] w-1.5 h-1.5 bg-[#fff4db] rounded-full animate-float-sparkle" style="animation-delay: 2.2s; --float-duration: 10s; --float-x: 20px; --float-y: -70px;"></div>
+        </div>
+
+        <!-- LEFT SIDEBAR UI PANEL (Deep Indigo, Muted Lavender & Slate Gray Gradient) -->
+        <div id="menu-left-panel" class="relative z-20 w-[88%] sm:w-[480px] md:w-[40%] lg:w-[38%] h-full bg-gradient-to-b from-[#110f1e]/98 via-[#17142b]/98 to-[#110f1e]/98 border-r border-[#2d284f]/60 flex flex-row shadow-[15px_0_45px_rgba(0,0,0,0.6)] transform -translate-x-full transition-transform duration-300 ease-out">
+            
+            <!-- FAR-LEFT NARROW UTILITY SIDEBAR STRIP -->
+            <div class="w-14 sm:w-16 h-full bg-[#090812] border-r border-[#1a172b] flex flex-col justify-between items-center py-6 text-[#8b83ab]">
+                <div class="flex flex-col gap-6 items-center">
+                    <!-- Brand elemental emblem -->
+                    <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-[#1E4D7A] to-[#3BA3FF] flex items-center justify-center text-white shadow-md">
+                        <i class="fa-solid fa-droplet text-xs animate-pulse"></i>
+                    </div>
+                    <!-- Utility Vertical Group -->
+                    <button onclick="openMenuSubSection('settings')" class="w-10 h-10 rounded-xl hover:bg-[#1f1a35] hover:text-[#f7e8cf] transition-all flex items-center justify-center relative" title="Settings">
+                        <i class="fa-solid fa-gear text-lg"></i>
+                    </button>
+                    <button class="w-10 h-10 rounded-xl hover:bg-[#1f1a35] hover:text-[#f7e8cf] transition-all flex items-center justify-center relative" title="Mail" onclick="openMenuSubSection('mail')">
+                        <i class="fa-solid fa-envelope text-lg"></i>
+                        <span class="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
+                    </button>
+                    <button class="w-10 h-10 rounded-xl hover:bg-[#1f1a35] hover:text-[#f7e8cf] transition-all flex items-center justify-center relative" title="Camera" onclick="openMenuSubSection('camera')">
+                        <i class="fa-solid fa-camera text-lg"></i>
+                    </button>
+                    <button class="w-10 h-10 rounded-xl hover:bg-[#1f1a35] hover:text-[#f7e8cf] transition-all flex items-center justify-center relative" title="Help / Guide" onclick="openMenuSubSection('guide')">
+                        <i class="fa-solid fa-circle-question text-lg"></i>
+                    </button>
+                </div>
+                <!-- Close Button at bottom of strip -->
+                <button id="close-menu-btn" class="w-10 h-10 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-all flex items-center justify-center" title="Close Menu">
+                    <i class="fa-solid fa-power-off text-lg"></i>
+                </button>
+            </div>
+
+            <!-- MAIN SIDEBAR WRAPPER -->
+            <div class="flex-1 h-full flex flex-col overflow-hidden">
+                
+                <!-- PLAYER PROFILE CARD HEADER -->
+                <div class="p-6 border-b border-[#201c36] bg-[#141224]/50">
+                    <div class="flex items-center gap-4">
+                        <!-- Portrait Box -->
+                        <div class="w-16 h-16 rounded-full border-2 border-[#ebdcb9] bg-gradient-to-b from-[#352f55] to-[#12101e] p-0.5 shadow-md relative overflow-hidden flex items-center justify-center cursor-pointer" onclick="openMenuSubSection('profile')">
+                            <i class="fa-solid fa-user-shield text-3xl text-[#ebdcb9]/90"></i>
+                        </div>
+                        <!-- Profile Info -->
+                        <div class="flex-1">
+                            <div class="flex items-center justify-between">
+                                <span id="paimon-menu-player-name" class="font-bold text-lg text-[#f7e8cf] tracking-wide cursor-pointer" onclick="openMenuSubSection('profile')">Traveler</span>
+                                <span class="text-[10px] bg-[#1E4D7A]/60 border border-[#3BA3FF]/40 text-[#6EC6FF] px-2 py-0.5 rounded-full font-bold">WL 5</span>
+                            </div>
+                            <p class="text-xs text-[#9c94c0] italic">Hydro Investigator</p>
+                            <div class="flex items-center gap-2 mt-1.5 text-[11px] text-[#ebdcb9]/80 font-mono">
+                                <span class="font-bold">Lv. 42</span>
+                                <span class="text-[#514975]">•</span>
+                                <span>EXP: 7,850 / 12,000</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Experience Progress Bar -->
+                    <div class="w-full h-1.5 bg-black/60 rounded-full mt-3 overflow-hidden border border-[#231e3b]">
+                        <div class="h-full bg-gradient-to-r from-[#1E4D7A] via-[#3BA3FF] to-[#6EC6FF] rounded-full" style="width: 65.4%;"></div>
+                    </div>
+                </div>
+
+                <!-- MAIN DIRECTORY (Toggled contents moved to RPG Sub-Window, only grid remains) -->
+                <div class="flex-1 overflow-y-auto p-5 scrollable-panel relative">
+                    
+                    <!-- GRID PANEL VIEW (4x4 Grid layout) -->
+                    <div id="menu-grid-view" class="h-full flex flex-col gap-4 transition-all duration-300">
+                        <p class="text-xs uppercase tracking-widest text-[#9c94c0]/80 font-bold border-b border-[#25213d] pb-1.5">Account Directory</p>
+                        
+                        <div class="grid grid-cols-4 gap-2.5">
+                            <!-- Character -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('character')">
+                                <i class="fa-solid fa-user text-lg mb-1 text-slate-300"></i>
+                                <span class="text-[9px] tracking-wide font-medium">Character</span>
+                            </div>
+                            <!-- Inventory -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('inventory')">
+                                <i class="fa-solid fa-briefcase text-lg mb-1 text-slate-300"></i>
+                                <span class="text-[9px] tracking-wide font-medium">Inventory</span>
+                                <span class="menu-notif-dot"></span>
+                            </div>
+                            <!-- Skill Book -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('skills-overview')">
+                                <i class="fa-solid fa-wand-magic-sparkles text-lg mb-1 text-[#3BA3FF]"></i>
+                                <span class="text-[9px] tracking-wide font-semibold text-[#6EC6FF]">Skills</span>
+                            </div>
+                            <!-- Map -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('map')">
+                                <i class="fa-solid fa-map text-lg mb-1 text-slate-300"></i>
+                                <span class="text-[9px] tracking-wide font-medium">Map</span>
+                            </div>
+
+                            <!-- Quests -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('quests')">
+                                <i class="fa-solid fa-compass text-lg mb-1 text-slate-300"></i>
+                                <span class="text-[9px] tracking-wide font-medium">Quests</span>
+                            </div>
+                            <!-- Comic Button Integration -->
+                            <div class="menu-grid-btn border-[#ebdcb9]/40 bg-[#241f3b]" onclick="openMenuSubSection('comic')">
+                                <i class="fa-solid fa-book-open text-lg mb-1 text-[#ebdcb9]"></i>
+                                <span class="text-[9px] tracking-wide font-bold text-[#f7e8cf]">Comic</span>
+                                <span class="menu-notif-dot"></span>
+                            </div>
+                            <!-- Team Setup -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('team')">
+                                <i class="fa-solid fa-users text-lg mb-1 text-slate-300"></i>
+                                <span class="text-[9px] tracking-wide font-medium">Team</span>
+                            </div>
+                            <!-- Crafting -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('craft')">
+                                <i class="fa-solid fa-hammer text-lg mb-1 text-slate-300"></i>
+                                <span class="text-[9px] tracking-wide font-medium">Craft</span>
+                            </div>
+
+                            <!-- Diagnostics / Archive -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('info')">
+                                <i class="fa-solid fa-box-archive text-lg mb-1 text-slate-300"></i>
+                                <span class="text-[9px] tracking-wide font-medium">Archive</span>
+                            </div>
+                            <!-- Shop -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('shop')">
+                                <i class="fa-solid fa-store text-lg mb-1 text-slate-300"></i>
+                                <span class="text-[9px] tracking-wide font-medium">Shop</span>
+                            </div>
+                            <!-- Achievements -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('medals')">
+                                <i class="fa-solid fa-trophy text-lg mb-1 text-slate-300"></i>
+                                <span class="text-[9px] tracking-wide font-medium">Medals</span>
+                            </div>
+                            <!-- Wish -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('wish')">
+                                <i class="fa-solid fa-star text-lg mb-1 text-slate-300"></i>
+                                <span class="text-[9px] tracking-wide font-medium">Wish</span>
+                            </div>
+
+                            <!-- Settings -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('settings')">
+                                <i class="fa-solid fa-gears text-lg mb-1 text-slate-300"></i>
+                                <span class="text-[9px] tracking-wide font-medium">Settings</span>
+                            </div>
+                            <!-- Feedback -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('feedback')">
+                                <i class="fa-solid fa-comment-dots text-lg mb-1 text-slate-300"></i>
+                                <span class="text-[9px] tracking-wide font-medium">Feedback</span>
+                            </div>
+                            <!-- Guides -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('guides')">
+                                <i class="fa-solid fa-circle-info text-lg mb-1 text-slate-300"></i>
+                                <span class="text-[9px] tracking-wide font-medium">Guides</span>
+                            </div>
+                            <!-- Help -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('help')">
+                                <i class="fa-solid fa-question text-lg mb-1 text-slate-300"></i>
+                                <span class="text-[9px] tracking-wide font-medium">Help</span>
+                            </div>
+                        </div>
+
+                        <!-- Mini Notification Banner (Dynamic) -->
+                        <div id="grid-alert-banner" class="mt-4 p-3 bg-red-950/40 border border-red-900/30 text-red-300 text-xs rounded-lg opacity-0 transition-opacity duration-300 pointer-events-none flex items-center gap-2">
+                            <i class="fa-solid fa-circle-exclamation text-sm"></i>
+                            <span id="grid-alert-text">Feature Locked</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Footer Stats / UID -->
+                <div class="p-4 bg-[#0a0811] border-t border-[#1b172d] flex items-center justify-between text-[11px] text-[#6e6884] font-mono">
+                    <span>UID: 810962002</span>
+                    <span>pre-alpha v0.1</span>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- NEW RPG CENTERED SUB WINDOW (Centrally displays selected directories with an elegant back button) -->
+    <div id="rpg-sub-window" class="absolute inset-0 z-50 bg-[#07050d]/80 opacity-0 pointer-events-none transition-all duration-300 flex items-center justify-center p-3 sm:p-6 md:p-8">
+        <div id="rpg-sub-window-panel" class="rpg-sub-window-panel w-full max-w-4xl h-[88vh] rounded-2xl flex flex-col overflow-hidden translate-y-8 transition-transform duration-300">
+            <!-- Header -->
+            <div class="p-4 border-b border-[#4a3e30] bg-[#1a1714] flex items-center justify-between">
+                <!-- Thay đổi closeSubWindow() bằng handleBackNavigation() -->
+                <button id="sub-window-back-btn" onclick="handleBackNavigation()" class="rpg-back-btn !m-0 !py-1.5 !px-4 text-xs font-bold text-[#dcb97d] flex items-center gap-2">
+                    <i class="fa-solid fa-chevron-left text-[10px]"></i> ← BACK
+                </button>
+                <span id="sub-window-title" class="font-serif font-bold text-xs sm:text-sm md:text-base text-[#ebdcb9] tracking-wider uppercase">SUB SECTOR</span>
+                <div class="w-20"></div> <!-- Balance Header spacing -->
+            </div>
+            <!-- Body -->
+                <div id="sub-window-body" class="flex-1 min-h-0 flex flex-col overflow-y-auto p-4 sm:p-6 scrollable-panel bg-[#12100e] text-[#c3bdda]">
+                    
+                    <!-- DYNAMIC TEMPLATE: SETTINGS -->
+                    <div id="menu-content-settings" class="hidden flex flex-col gap-4">
+                        <h3 class="text-xl font-bold text-[#ebdcb9] font-serif border-b border-[#2d284f]/40 pb-2">System Settings</h3>
+                        
+                        <!-- Camera Sensitivity Slider -->
+                        <div class="flex flex-col bg-[#141224]/80 p-4 rounded-xl border border-[#2d284f]/40 gap-3">
+                            <div class="flex flex-col gap-0.5">
+                                <span class="text-sm font-semibold text-[#f1e6d0]">Camera Sensitivity</span>
+                                <span class="text-[11px] text-[#9c94c0]">Adjust mouse and touch rotation rates.</span>
+                            </div>
+                            
+                            <div class="flex items-center gap-4 w-full">
+                                <i class="fa-solid fa-tortoise text-stone-500 text-sm"></i>
+                                <input type="range" id="cam-sens-slider" min="10" max="300" value="100" class="flex-1 cursor-pointer">
+                                <span class="text-xs font-mono text-amber-400 font-bold w-10 text-right" id="cam-sens-value">100%</span>
+                            </div>
+                        </div>
+
+                        <!-- Infrastructure Update #1 — Save System (mục 4 spec): cho phép người chơi
+                             chủ động xoá toàn bộ dữ liệu lưu, bắt đầu hành trình mới hoàn toàn. Card
+                             riêng biệt (viền đỏ nhạt) để tách biệt rõ ràng khỏi các setting thông
+                             thường — đây là hành động PHÁ HUỶ, không phải tinh chỉnh trải nghiệm. -->
+                        <div class="flex flex-col bg-[#141224]/80 p-4 rounded-xl border border-red-900/40 gap-3">
+                            <div class="flex flex-col gap-0.5">
+                                <span class="text-sm font-semibold text-[#f1e6d0]">Save Data</span>
+                                <span class="text-[11px] text-[#9c94c0]">Xoá toàn bộ tiến trình đã lưu (vị trí, vật phẩm, nhiệm vụ, EXP, Nguyên Thạch) và bắt đầu một hành trình mới. Hành động này không thể hoàn tác.</span>
+                            </div>
+                            <button id="reset-save-btn" onclick="confirmResetSaveData()" class="w-full py-2 rounded-lg border border-red-800/60 text-red-400 text-xs font-semibold hover:bg-red-950/40 hover:text-red-300 transition-colors flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-trash-can"></i> Reset Save Data
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Infrastructure Update #1 — Save System: overlay xác nhận trước khi reset, tránh
+                         mất tiến trình do bấm nhầm (hành động không thể hoàn tác). Ẩn mặc định, nằm
+                         NGOÀI #rpg-sub-window để luôn hiện đè lên trên mọi thứ khác (z-index cao nhất
+                         trong các overlay hiện có), giống cấu trúc #quest-popup-overlay. -->
+                    <div id="reset-save-confirm-overlay" class="hidden fixed inset-0 z-[70] flex items-center justify-center bg-black/70 pointer-events-auto">
+                        <div class="bg-[#141224] border border-red-900/50 rounded-2xl p-6 max-w-xs w-[90%] shadow-2xl flex flex-col gap-4">
+                            <div class="flex items-center gap-2 text-red-400">
+                                <i class="fa-solid fa-triangle-exclamation"></i>
+                                <h4 class="font-bold text-sm">Xác nhận Reset</h4>
+                            </div>
+                            <p class="text-xs text-[#c3bdda] leading-relaxed">Toàn bộ tiến trình (vị trí, vật phẩm, nhiệm vụ, EXP, Nguyên Thạch) sẽ bị xoá vĩnh viễn. Bạn có chắc chắn muốn tiếp tục?</p>
+                            <div class="flex gap-2">
+                                <button onclick="closeResetSaveDataConfirm()" class="flex-1 py-2 rounded-lg border border-[#2d284f]/60 text-[#c3bdda] text-xs font-semibold hover:bg-[#1c1830] transition-colors">Huỷ</button>
+                                <button onclick="window.resetSaveData()" class="flex-1 py-2 rounded-lg bg-red-800/80 text-red-100 text-xs font-semibold hover:bg-red-700 transition-colors">Xoá dữ liệu</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- DYNAMIC TEMPLATE: ARCHIVE / DIAGNOSTICS -->
+                    <div id="menu-content-info" class="hidden flex flex-col gap-4">
+                        <h3 class="text-xl font-bold text-[#ebdcb9] font-serif border-b border-[#2d284f]/40 pb-2">Diagnostics</h3>
+                        
+                        <div class="flex flex-col gap-3">
+                            <div class="bg-[#141224]/80 p-4 rounded-xl border border-[#2d284f]/40 shadow-lg text-xs leading-relaxed text-[#c3bdda] space-y-3">
+                                <div>
+                                    <h4 class="text-sm font-bold text-amber-400 mb-1 flex items-center gap-1.5">
+                                        <i class="fa-solid fa-seedling"></i> Project Overview
+                                    </h4>
+                                    <p>An anime-style action RPG prototype focused on premium water and climbing traversal dynamics.</p>
+                                </div>
+
+                                <div class="border-t border-[#2d284f]/40 pt-3">
+                                    <h4 class="text-xs font-bold text-[#f7e8cf]/80 uppercase tracking-wider mb-1">State Monitor</h4>
+                                    <div class="grid grid-cols-1 gap-1.5 font-mono text-[10px]">
+                                        <div class="flex justify-between">
+                                            <span class="text-stone-400">Position:</span>
+                                            <span id="pos-display" class="text-emerald-400">0.0, 0.0, 0.0</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-stone-400">Phys State:</span>
+                                            <span id="physics-display" class="text-amber-300 font-bold">Grounded</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-stone-400">Dash CD:</span>
+                                            <span id="dash-state-tag" class="text-emerald-400 font-bold">READY</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-stone-400">Stamina:</span>
+                                            <span id="stamina-state-tag" class="text-amber-400 font-bold">100 / 100</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-stone-400">Move State:</span>
+                                            <span id="move-state-tag" class="text-amber-300 font-bold">JOG</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-stone-400">Energy:</span>
+                                            <span id="energy-display" class="text-amber-400 font-bold">0 / 40</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- DYNAMIC TEMPLATE: COMIC BOOKCASE -->
+                    <div id="menu-content-comic" class="hidden flex flex-col gap-4 h-full min-h-0">
+                        <h3 class="text-xl font-bold text-[#ebdcb9] font-serif border-b border-[#2d284f]/40 pb-2">Devlog Case Archive</h3>
+                        <p class="text-[11px] text-[#9c94c0] font-serif italic mb-2">Technical report logs solved by the AI investigative bureau.</p>
+
+                        <div id="comic-case-list" class="flex flex-col gap-3">
+                            <!-- Danh sách case được render động bởi renderComicBookcase() (comic.js).
+                                 Thêm case mới chỉ cần sửa COMIC_CASES trong comic.js — không cần sửa ở đây. -->
+                        </div>
+                    </div>
+
+                    <!-- STORY READER — trang RIÊNG BIỆT, ngang hàng với menu-content-comic (không lồng
+                         bên trong nữa). Khi mở 1 case, trang này THAY THẾ HOÀN TOÀN menu-content-comic,
+                         chiếm trọn #sub-window-body y hệt cách các trang khác (settings/info/...) hoạt
+                         động. Bấm "BACK TO COMICS" sẽ ẩn trang này và hiện lại menu-content-comic. -->
+                    <div id="comic-story-reader" class="hidden flex flex-col gap-4 h-full min-h-0 bg-[#0f0d1a] border border-[#2d284f]/60 rounded-xl p-4 shadow-xl overflow-hidden">
+                        <div class="flex items-center justify-between border-b border-[#2d284f]/40 pb-2.5 mb-3">
+                            <!-- Điều chỉnh sang nút Back đồng bộ hệ thống -->
+                            <button onclick="handleBackNavigation()" class="rpg-back-btn !m-0 !py-1 !px-3 text-[10px]"><i class="fa-solid fa-left-long"></i> BACK TO COMICS</button>
+                            <span id="story-reader-case-tag" class="text-[10px] font-mono font-bold text-amber-500">CASE FILE</span>
+                        </div>
+
+                        <h4 id="story-reader-title" class="text-base font-bold font-serif text-[#ebdcb9] mb-3 text-center"></h4>
+
+                        <!-- Scrollable story container: flex-1 để lấp đầy phần không gian còn lại
+                             của comic-story-reader, thay vì chiều cao cố định h-[340px] như trước. -->
+                        <div id="story-reader-content" class="flex-1 min-h-0 bg-[#12101e] p-4 rounded-xl text-xs leading-relaxed text-[#c3bdda] overflow-y-auto scrollable-panel space-y-4 border border-[#1e1935]">
+                            <!-- Injected story contents -->
+                        </div>
+                    </div>
+
+                    <!-- DYNAMIC TEMPLATE: SKILLS OVERVIEW -->
+                    <div id="menu-content-skills-overview" class="hidden flex flex-col gap-4">
+                        <h3 class="text-xl font-bold text-[#ebdcb9] font-serif border-b border-[#2d284f]/40 pb-2">Hydro Talents</h3>
+                        
+                        <div class="space-y-3.5">
+                            <div class="bg-[#141224]/80 p-4 rounded-xl border border-[#2d284f]/40 flex gap-3">
+                                <div class="w-10 h-10 rounded-full bg-gradient-to-tr from-[#1E4D7A] to-[#3BA3FF] flex items-center justify-center text-white flex-shrink-0 shadow">
+                                    <i class="fa-solid fa-wand-magic-sparkles text-sm"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h4 class="text-sm font-bold text-[#3BA3FF]">Elemental Skill: Pneuma Spark</h4>
+                                    <p class="text-xs text-[#9c94c0] mt-1 leading-relaxed">Swift continuous fluid projectiles chasing targets, culminating in a powerful water pierce strike.</p>
+                                </div>
+                            </div>
+
+                            <div class="bg-[#141224]/80 p-4 rounded-xl border border-[#2d284f]/40 flex gap-3">
+                                <div class="w-10 h-10 rounded-full bg-gradient-to-tr from-[#1E4D7A] to-[#6EC6FF] flex items-center justify-center text-white flex-shrink-0 shadow">
+                                    <i class="fa-solid fa-droplet text-sm animate-pulse"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <h4 class="text-sm font-bold text-[#6EC6FF]">Elemental Burst: Torrent Sphere</h4>
+                                    <p class="text-xs text-[#9c94c0] mt-1 leading-relaxed">Releases a massive hydro orb dealing heavy splash and area control impact to all static entities.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- DYNAMIC TEMPLATE: CHARACTER (Pre-Alpha v0.8) -->
+                    <!-- Layout phong cách Genshin Character Screen: cột trái = model/ảnh + tên/level/
+                         element, cột phải = EXP bar + Attributes (HP/ATK/DEF) + Weapon slot (Reserved).
+                         Toàn bộ nội dung động (tên, số liệu) được render bởi window.renderCharacterScreen()
+                         (ui.js) đọc từ CHARACTER_DATA + player.stats/level/exp — HTML chỉ là khung rỗng
+                         với id để JS điền vào, giống hệt pattern đã dùng cho Inventory. -->
+                    <div id="menu-content-character" class="hidden flex flex-col gap-3 h-full min-h-0">
+                        <h3 class="text-xl font-bold text-[#ebdcb9] font-serif border-b border-[#2d284f]/40 pb-2 flex-shrink-0">Character</h3>
+
+                        <div class="flex-1 min-h-0 flex flex-col sm:flex-row gap-3 overflow-y-auto scrollable-panel">
+                            <!-- Cột trái: model/ảnh + tên/level/element -->
+                            <div class="w-full sm:w-56 flex-shrink-0 bg-[#141224]/80 border border-[#2d284f]/40 rounded-xl p-4 flex flex-col items-center gap-3">
+                                <div class="w-32 h-32 rounded-full bg-gradient-to-b from-[#1E4D7A] to-[#12101e] border-2 border-[#ebdcb9]/40 flex items-center justify-center text-5xl text-[#6EC6FF] overflow-hidden">
+                                    <!-- Chưa có model/ảnh nhân vật thật (Pre-Alpha) — placeholder icon,
+                                         đổi sang <img>/model 3D thật khi có asset, không cần sửa cấu
+                                         trúc render (chỉ đổi nội dung bên trong #character-portrait). -->
+                                    <span id="character-portrait"><i class="fa-solid fa-person"></i></span>
+                                </div>
+                                <div class="text-center">
+                                    <h4 id="character-name" class="text-lg font-bold text-[#f7e8cf] font-serif"></h4>
+                                    <span id="character-region" class="text-[10px] uppercase tracking-wider text-[#9c94c0]"></span>
+                                </div>
+                                <div class="flex items-center gap-2 text-xs">
+                                    <span class="px-2 py-0.5 rounded-full bg-[#1E4D7A]/50 border border-[#6EC6FF]/40 text-[#6EC6FF] font-semibold flex items-center gap-1">
+                                        <i class="fa-solid fa-droplet"></i> <span id="character-element"></span>
+                                    </span>
+                                    <span class="px-2 py-0.5 rounded-full bg-amber-900/30 border border-amber-500/40 text-amber-300 font-bold">Lv. <span id="character-level"></span></span>
+                                </div>
+
+                                <!-- Weapon Slot (Reserved — Alpha) -->
+                                <div class="w-full mt-2 pt-3 border-t border-[#2d284f]/40">
+                                    <span class="text-[10px] uppercase tracking-wider text-[#6e6884]">Vũ khí</span>
+                                    <div class="mt-1.5 w-full h-14 rounded-lg border border-dashed border-[#2d284f]/60 bg-[#0d0b17]/60 flex items-center justify-center text-[#6e6884] text-xs gap-2">
+                                        <i class="fa-solid fa-lock"></i> Reserved
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Cột phải: EXP bar + Attributes -->
+                            <div class="flex-1 min-h-0 flex flex-col gap-3">
+                                <!-- Thanh EXP -->
+                                <div class="bg-[#141224]/80 border border-[#2d284f]/40 rounded-xl p-4">
+                                    <div class="flex items-center justify-between text-xs mb-1.5">
+                                        <span class="text-[#9c94c0] font-semibold uppercase tracking-wider">EXP</span>
+                                        <span id="character-exp-text" class="font-mono text-cyan-300"></span>
+                                    </div>
+                                    <div class="h-2.5 bg-stone-950 rounded-full overflow-hidden border border-stone-800">
+                                        <div id="character-exp-fill" class="h-full bg-gradient-to-r from-cyan-500 to-cyan-300 rounded-full transition-all duration-300" style="width: 0%;"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Attributes -->
+                                <div class="bg-[#141224]/80 border border-[#2d284f]/40 rounded-xl p-4 flex-1 flex flex-col gap-3">
+                                    <h4 class="text-xs uppercase tracking-wider text-[#9c94c0] font-semibold border-b border-[#2d284f]/40 pb-2">Attributes</h4>
+
+                                    <div class="flex items-center justify-between text-sm">
+                                        <span class="text-[#9c94c0] flex items-center gap-2"><i class="fa-solid fa-heart text-red-400 w-4 text-center"></i> HP</span>
+                                        <span id="character-hp-text" class="font-mono font-bold text-[#f7e8cf]"></span>
+                                    </div>
+                                    <div class="h-2 bg-stone-950 rounded-full overflow-hidden border border-stone-800 -mt-2">
+                                        <div id="character-hp-fill" class="h-full bg-emerald-600 rounded-full transition-all duration-150" style="width: 100%;"></div>
+                                    </div>
+
+                                    <div class="flex items-center justify-between text-sm">
+                                        <span class="text-[#9c94c0] flex items-center gap-2"><i class="fa-solid fa-khanda text-amber-400 w-4 text-center"></i> ATK</span>
+                                        <span id="character-atk-text" class="font-mono font-bold text-[#f7e8cf]"></span>
+                                    </div>
+
+                                    <div class="flex items-center justify-between text-sm">
+                                        <span class="text-[#9c94c0] flex items-center gap-2"><i class="fa-solid fa-shield-halved text-sky-400 w-4 text-center"></i> DEF</span>
+                                        <span id="character-def-text" class="font-mono font-bold text-[#f7e8cf]"></span>
+                                    </div>
+
+                                    <!-- Chỉ số nâng cao (Reserved — Alpha: CRIT Rate, CRIT DMG, Elemental
+                                         Mastery, Energy Recharge...) — placeholder để layout đã có chỗ,
+                                         chưa có giá trị/logic thật (spec "Chuẩn bị cho Alpha"). -->
+                                    <div class="mt-auto pt-3 border-t border-[#2d284f]/40 flex items-center justify-center text-[11px] text-[#6e6884] gap-2">
+                                        <i class="fa-solid fa-lock"></i> Chỉ số nâng cao (Reserved)
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- DYNAMIC TEMPLATE: INVENTORY (Pre-Alpha v0.6) -->
+                    <div id="menu-content-inventory" class="hidden flex flex-col gap-3 h-full min-h-0">
+                        <h3 class="text-xl font-bold text-[#ebdcb9] font-serif border-b border-[#2d284f]/40 pb-2 flex-shrink-0">Inventory</h3>
+
+                        <!-- Tab danh mục — data-driven, render động bởi renderInventoryCategoryTabs()
+                             (ui.js) từ ITEM_CATEGORIES (game.js). KHÔNG hard-code 6 nút category ở
+                             đây — thêm category mới trong ITEM_CATEGORIES sẽ tự xuất hiện 1 tab mới
+                             mà không cần sửa HTML. -->
+                        <div id="inventory-category-tabs" class="flex gap-1.5 flex-wrap flex-shrink-0">
+                            <!-- Mỗi tab category được JS chèn vào đây -->
+                        </div>
+
+                        <!-- Layout 2 cột trên màn rộng (grid trái, chi tiết phải), xếp dọc trên mobile
+                             (grid trên, chi tiết dưới) — flex-col mặc định, chuyển sm:flex-row. -->
+                        <div class="flex-1 min-h-0 flex flex-col sm:flex-row gap-3">
+                            <!-- Grid vật phẩm -->
+                            <div class="flex-1 min-h-0 bg-[#141224]/60 border border-[#2d284f]/40 rounded-xl p-3 overflow-y-auto scrollable-panel">
+                                <div id="inventory-item-grid" class="grid grid-cols-4 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                                    <!-- Mỗi ô vật phẩm được JS chèn vào đây bởi renderInventoryGrid() (ui.js) -->
+                                </div>
+                                <!-- Hiện khi danh mục đang chọn không có vật phẩm nào -->
+                                <div id="inventory-empty-state" class="hidden flex-col items-center justify-center text-center py-10 gap-2 text-[#6e6884]">
+                                    <i class="fa-solid fa-box-open text-2xl"></i>
+                                    <span class="text-xs">Chưa có vật phẩm nào trong danh mục này.</span>
+                                </div>
+                            </div>
+
+                            <!-- Panel chi tiết vật phẩm đang chọn -->
+                            <div class="w-full sm:w-64 flex-shrink-0 bg-[#141224]/80 border border-[#2d284f]/40 rounded-xl p-4 flex flex-col">
+                                <div id="inventory-detail-empty" class="flex-1 flex flex-col items-center justify-center text-center gap-2 text-[#6e6884]">
+                                    <i class="fa-solid fa-hand-pointer text-2xl"></i>
+                                    <span class="text-xs">Chọn một vật phẩm để xem chi tiết.</span>
+                                </div>
+                                <div id="inventory-detail-content" class="hidden flex-1 flex flex-col gap-3">
+                                    <div class="w-16 h-16 mx-auto rounded-xl bg-[#0d0b17] border border-[#2d284f]/60 flex items-center justify-center text-3xl">
+                                        <span id="inventory-detail-icon"></span>
+                                    </div>
+                                    <div class="text-center">
+                                        <h4 id="inventory-detail-name" class="text-sm font-bold text-[#f7e8cf]"></h4>
+                                        <span id="inventory-detail-category" class="text-[10px] uppercase tracking-wider text-amber-400/80 font-semibold"></span>
+                                    </div>
+                                    <p id="inventory-detail-description" class="text-xs text-[#9c94c0] leading-relaxed text-center"></p>
+                                    <div class="mt-auto pt-2 border-t border-[#2d284f]/40 flex items-center justify-between text-[11px]">
+                                        <span class="text-[#6e6884]">Số lượng sở hữu</span>
+                                        <span id="inventory-detail-quantity" class="font-mono font-bold text-amber-300"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- DYNAMIC TEMPLATE: LOCKED FEATURE PLACEHOLDER -->
+                    <div id="menu-content-locked" class="hidden flex flex-col items-center justify-center text-center py-12 px-6">
+                        <div class="w-20 h-20 rounded-full border-2 border-[#dcb97d]/40 flex items-center justify-center text-[#dcb97d] text-3xl mb-4 bg-[#1f1b15] shadow-lg">
+                            <i class="fa-solid fa-hourglass-half animate-pulse"></i>
+                        </div>
+                        <h4 id="locked-feature-title" class="text-lg font-bold font-serif text-[#ebdcb9] mb-2 uppercase tracking-wide">FEATURE ENCRYPTED</h4>
+                        <p class="text-xs text-[#9c94c0] max-w-sm leading-relaxed">This travel chronicle page is currently sealed. Keep investigating the hydro anomalies to unlock further log data!</p>
+                        <span class="text-[10px] text-amber-500/60 font-mono mt-4 uppercase tracking-widest">Adventure Rank 42 Required</span>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- HỆ THỐNG THANH MÁU PLAYER -->
+    <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 w-72 max-w-[90vw] px-4 py-2.5 bg-stone-900/80 border border-amber-900/30 backdrop-blur-md rounded-full shadow-2xl flex items-center space-x-3 pointer-events-none transition-all">
+        <span class="text-[10px] font-bold text-amber-400 tracking-wider">HP</span>
+        <div class="flex-1 h-3.5 bg-stone-950 rounded-full overflow-hidden border border-stone-800">
+            <div id="hp-fill" class="h-full bg-emerald-600 rounded-full transition-all duration-150" style="width: 100%;"></div>
+        </div>
+        <span id="hp-text" class="text-[11px] font-bold text-stone-200 font-mono">100 / 100</span>
+    </div>
+
+    <!-- DESKTOP SKILL HUD SLOT (PC only) -->
+    <div id="desktop-hud" class="absolute inset-0 pointer-events-none z-30 hidden">
+        <div id="desktop-skill-btn" class="absolute bottom-6 right-6 w-16 h-16 bg-[#12101e]/90 border border-[#3BA3FF]/40 rounded-2xl flex flex-col items-center justify-center text-[#3BA3FF] shadow-2xl overflow-hidden cursor-pointer select-none active:scale-95 pointer-events-auto transition-transform hover:shadow-[0_0_12px_rgba(59,163,255,0.4)]">
+            <i class="fa-solid fa-wand-magic-sparkles text-xl opacity-90"></i>
+            <span class="text-[10px] font-bold text-stone-400 mt-1">[E] Skill</span>
+            <div id="desktop-cooldown-overlay" class="absolute inset-0 bg-stone-950/85 flex items-center justify-center text-white font-bold text-sm hidden pointer-events-none">
+                <span id="desktop-cooldown-text">5</span>
+                <div id="desktop-cooldown-radial" class="absolute inset-0 border-4 border-[#3BA3FF] rounded-xl transition-opacity duration-100" style="opacity: 0;"></div>
+            </div>
+        </div>
+
+        <div id="desktop-burst-btn" class="absolute bottom-6 left-6 w-20 h-20 bg-[#12101e]/95 border-2 border-[#1E4D7A]/50 rounded-full flex flex-col items-center justify-center text-stone-500 shadow-2xl overflow-hidden cursor-pointer select-none active:scale-95 pointer-events-auto transition-all duration-300 hover:shadow-[0_0_15px_rgba(110,198,255,0.3)]" style="position:absolute;">
+            <div id="desktop-burst-water" class="absolute bottom-0 left-0 right-0 rounded-b-full pointer-events-none" style="height:0%; background:linear-gradient(to top, rgba(30,77,122,0.65), rgba(110,198,255,0.45)); transition: height 0.18s ease-out;"></div>
+            <div id="desktop-burst-ripple" class="absolute left-0 right-0 h-1 pointer-events-none opacity-0" style="background: rgba(110,198,255,0.6); transition: top 0.18s ease-out; top: 50%;"></div>
+            <i class="fa-solid fa-droplet text-2xl relative z-10" id="desktop-burst-icon"></i>
+            <span class="text-[9px] font-bold mt-0.5 relative z-10 leading-none" id="desktop-burst-label">[Q] Burst</span>
+            <span class="text-[8px] font-mono relative z-10 leading-none mt-0.5 opacity-70" id="desktop-burst-energy-text">0/40</span>
+        </div>
+    </div>
+
+    <!-- PROMPT TƯƠNG TÁC (hiện khi đủ gần 1 Interactable) -->
+    <div id="interact-prompt" class="fixed left-1/2 bottom-32 -translate-x-1/2 z-40 hidden">
+        <button id="interact-prompt-btn" class="flex items-center gap-2 bg-[#12101e]/90 border border-amber-400/50 rounded-full px-4 py-2 shadow-2xl pointer-events-auto cursor-pointer hover:border-amber-400/80 transition-colors">
+            <span class="hidden md:inline-flex items-center justify-center w-6 h-6 bg-amber-400/20 border border-amber-400/60 rounded text-amber-300 font-bold text-xs">F</span>
+            <span class="md:hidden inline-flex items-center justify-center w-6 h-6 bg-amber-400/20 border border-amber-400/60 rounded-full text-amber-300">
+                <i class="fa-solid fa-hand-pointer text-xs"></i>
+            </span>
+            <span id="interact-prompt-text" class="text-xs font-semibold text-amber-100">Nhấn F để xem nhiệm vụ</span>
+        </button>
+    </div>
+
+    <!-- POPUP DANH SÁCH NHIỆM VỤ (v0.6 Wilderness — nhiều quest, có scroll khi vượt quá màn hình) -->
+    <div id="quest-list-overlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60">
+        <div id="quest-list-panel" class="bg-[#12101e] border border-amber-400/40 rounded-2xl shadow-2xl p-6 flex flex-col gap-4" style="width: 36vw; min-width: 340px; max-width: 520px; max-height: 78vh;">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-bold text-amber-200">Bảng Nhiệm Vụ</h2>
+                <button id="quest-list-close-btn" class="text-stone-400 hover:text-stone-200 transition-colors">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            <!-- scrollable-panel: nhận đúng ưu tiên xử lý touch/scroll riêng đã có sẵn cho các panel cuộn khác -->
+            <div id="quest-list-scroll" class="scrollable-panel flex flex-col gap-3 overflow-y-auto pr-1" style="max-height: 60vh;">
+                <!-- Mỗi quest instance được JS chèn vào đây dưới dạng 1 thẻ (xem quest-list-card-template) -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Template ẩn cho 1 thẻ quest trong danh sách (dùng JS clone) -->
+    <template id="quest-list-card-template">
+        <div class="quest-list-card bg-black/20 border border-stone-700 rounded-xl p-4 flex flex-col gap-2">
+            <div class="flex items-start justify-between gap-3">
+                <h3 class="quest-list-card-title text-sm font-bold text-amber-100"></h3>
+                <span class="quest-list-card-slot-tag text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border"></span>
+            </div>
+            <p class="quest-list-card-description text-xs text-stone-300 leading-relaxed"></p>
+            <div class="flex items-center justify-between mt-1">
+                <div class="flex items-center gap-1.5">
+                    <i class="quest-list-card-reward-icon fa-solid fa-gem text-sky-300 text-xs"></i>
+                    <span class="quest-list-card-reward-text text-xs font-semibold text-stone-200"></span>
+                </div>
+                <span class="quest-list-card-progress text-xs font-semibold text-stone-400"></span>
+            </div>
+            <button class="quest-list-card-action-btn mt-1 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors"></button>
+        </div>
+    </template>
+
+    <!-- ============================================================
+         DIALOGUE UI (Pre-Alpha v0.5) — kiến trúc nền tảng dùng chung cho
+         NPC / Quest / Shop / Blacksmith / Cooking / Story / Cutscene / Event.
+         Engine (window.openDialogue/advanceDialogue/closeDialogue) ở ui.js,
+         dữ liệu hội thoại (NPC_DIALOGUE_DATA) ở game.js — file này CHỈ chứa
+         khung nhìn, không có nội dung cứng cho bất kỳ NPC cụ thể nào.
+         ============================================================ -->
+
+    <!-- Khung hội thoại chính — neo cạnh dưới màn hình theo đúng phong cách Genshin Impact.
+         Toàn bộ khung có thể bấm/chạm để advance (window.advanceDialogue), trừ vùng các nút
+         choice (đã stopPropagation riêng — xem renderDialogueChoices trong ui.js). -->
+    <div id="dialogue-box" class="fixed inset-x-0 bottom-0 z-50 hidden justify-center pb-6 md:pb-10 px-4 pointer-events-auto cursor-pointer">
+        <div class="w-full md:max-w-2xl">
+            <!-- Tên người nói — nằm phía trên nội dung, dính liền khung dưới (rounded-t, -mb-px) -->
+            <div class="inline-block bg-[#12101e] border border-amber-400/50 rounded-t-lg px-5 py-1.5 -mb-px relative z-10">
+                <span id="dialogue-speaker" class="text-amber-200 font-bold text-sm tracking-wide"></span>
+            </div>
+            <!-- Nội dung hội thoại — hiệu ứng Typewriter chạy vào #dialogue-text (xem ui.js) -->
+            <div class="bg-[#12101e]/95 border border-amber-400/40 rounded-lg rounded-tl-none shadow-2xl px-5 py-4 min-h-[88px] relative">
+                <p id="dialogue-text" class="text-stone-100 text-sm md:text-base leading-relaxed whitespace-pre-line"></p>
+                <!-- Mũi tên nhấp nháy — chỉ hiện khi câu đã hiện xong VÀ không có choice đang chờ -->
+                <div id="dialogue-continue-indicator" class="hidden absolute bottom-2 right-3 text-amber-300 animate-bounce">
+                    <i class="fa-solid fa-caret-down"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CHOICE SYSTEM (mục 6) — xếp dọc, lệch phải, đặt phía TRÊN dialogue-box (bottom: 160px là
+         ước lượng chiều cao khung thoại + khoảng đệm — có thể cần tinh chỉnh lại theo asset thật). -->
+    <div id="dialogue-choices-container" class="fixed right-4 md:right-10 z-50 hidden flex-col gap-2 items-end pointer-events-auto" style="bottom: 160px;">
+        <!-- Mỗi lựa chọn được JS clone từ template bên dưới -->
+    </div>
+    <template id="dialogue-choice-template">
+        <button class="dialogue-choice-btn bg-[#12101e]/95 border border-amber-400/40 hover:border-amber-400/80 hover:bg-[#1c1830] active:scale-95 rounded-lg px-4 py-2 text-xs md:text-sm font-semibold text-amber-100 shadow-xl transition-all text-right"></button>
+    </template>
+
+    <!-- POPUP "HOÀN THÀNH" (giữa màn hình, tự ẩn) -->
+    <div id="quest-complete-popup" class="fixed inset-0 z-[60] hidden items-center justify-center pointer-events-none">
+        <div class="bg-[#12101e]/95 border border-amber-400/60 rounded-2xl px-8 py-4 shadow-2xl">
+            <span class="text-2xl font-bold text-amber-300 tracking-wide">HOÀN THÀNH</span>
+        </div>
+    </div>
+
+    <!-- POPUP NHẬN THƯỞNG (góc trái, dưới quest tracker, tự biến mất sau 2s) -->
+    <div id="reward-popup-container" class="fixed left-4 z-40 flex flex-col gap-2 pointer-events-none" style="top: calc(33.333vh + 90px);">
+        <!-- Mỗi phần thưởng nhận được sẽ được JS chèn vào đây -->
+    </div>
+
+    <!-- Template ẩn cho 1 thẻ phần thưởng (dùng JS clone) -->
+    <template id="reward-popup-item-template">
+        <div class="reward-popup-item flex items-center gap-2 bg-[#12101e]/85 border border-amber-400/40 rounded-lg px-3 py-1.5 shadow-lg opacity-0 transition-opacity duration-300">
+            <i class="reward-popup-icon fa-solid fa-coins text-amber-300 text-sm"></i>
+            <span class="reward-popup-text text-xs font-semibold text-amber-100"></span>
+        </div>
+    </template>
+
+    <!-- POPUP NHẬP TÊN NGƯỜI CHƠI (Pre-Alpha v0.8 — Character) — chỉ hiện DUY NHẤT 1 lần lúc bắt
+         đầu hành trình mới (chưa có save data), hiển thị/ẩn qua window.showPlayerNamePrompt() /
+         window.closePlayerNamePrompt() (ui.js). Không có nút đóng/backdrop-click — bắt buộc chọn 1
+         trong 2 nút (Xác nhận/Hủy) để tránh trạng thái CHARACTER_DATA.name rỗng/undefined. -->
+    <div id="player-name-prompt-overlay" class="fixed inset-0 z-[80] hidden items-center justify-center bg-black/70 pointer-events-auto">
+        <div class="bg-[#12101e]/95 border border-[#ebdcb9]/40 rounded-2xl px-6 py-6 shadow-2xl w-full max-w-xs mx-4 flex flex-col gap-4">
+            <div class="text-center">
+                <h3 class="text-lg font-bold text-[#f7e8cf] font-serif">Chào mừng, Nhà Lữ Hành</h3>
+                <p class="text-xs text-[#9c94c0] mt-1">Nhập tên cho hành trình của bạn</p>
+            </div>
+            <input id="player-name-prompt-input" type="text" maxlength="16" placeholder="Traveler"
+                   onkeydown="if(event.key==='Enter'){confirmPlayerNamePrompt();}"
+                   class="w-full bg-[#0d0b17] border border-[#2d284f]/60 rounded-lg px-3 py-2 text-sm text-[#f7e8cf] placeholder-[#6e6884] focus:outline-none focus:border-amber-400/60" />
+            <div class="flex gap-3">
+                <button onclick="cancelPlayerNamePrompt()" class="flex-1 py-2 rounded-lg border border-[#2d284f]/60 text-[#9c94c0] text-sm font-semibold hover:bg-[#1f1a35] transition-all">Hủy</button>
+                <button onclick="confirmPlayerNamePrompt()" class="flex-1 py-2 rounded-lg bg-amber-500/80 hover:bg-amber-400/90 text-[#12101e] text-sm font-bold transition-all">Xác nhận</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- QUEST TRACKER (góc trái, trên giữa màn hình) -->
+    <div id="quest-tracker" class="fixed left-4 top-1/3 z-30 hidden flex-col gap-2 pointer-events-none">
+        <!-- Mỗi quest active sẽ được JS chèn vào đây dưới dạng 1 thẻ -->
+    </div>
+
+    <!-- Template ẩn cho 1 thẻ quest trong tracker (dùng JS clone) -->
+    <template id="quest-tracker-item-template">
+        <div class="quest-tracker-item flex items-start gap-2 bg-[#12101e]/80 border-l-2 border-amber-400/70 rounded-r-lg px-3 py-2 shadow-lg max-w-xs">
+            <i class="fa-solid fa-scroll text-amber-300 text-sm mt-0.5 relative">
+                <span class="quest-tracker-exclaim absolute -top-1 -right-1 text-[9px] font-bold text-red-400">!</span>
+            </i>
+            <div class="flex flex-col">
+                <span class="quest-tracker-title text-xs font-semibold text-amber-100"></span>
+                <span class="quest-tracker-progress text-[10px] text-stone-400"></span>
+            </div>
+        </div>
+    </template>
+
+    <!-- Template ẩn cho 1 ô vật phẩm trong grid Inventory (dùng JS clone) -->
+    <template id="inventory-item-slot-template">
+        <button class="inventory-item-slot aspect-square bg-[#0d0b17] border border-[#2d284f]/60 rounded-lg flex flex-col items-center justify-center relative hover:border-amber-400/60 transition-colors p-1">
+            <span class="inventory-item-slot-icon text-xl sm:text-2xl leading-none"></span>
+            <span class="inventory-item-slot-qty absolute bottom-0.5 right-1 text-[10px] font-mono font-bold text-amber-200 drop-shadow"></span>
+        </button>
+    </template>
+
+    <!-- Template ẩn cho 1 tab danh mục trong Inventory (dùng JS clone). Class mặc định = trạng thái
+         INACTIVE (viền xám mờ, chữ xám) — renderInventoryGrid() (ui.js) thêm/bớt trực tiếp các class
+         Tailwind cụ thể (không dùng 1 custom class trừu tượng) để chuyển sang trạng thái active, vì
+         style/style.css (nơi định nghĩa các custom class khác như .menu-grid-btn) nằm ngoài phạm vi
+         chỉnh sửa của tính năng này. -->
+    <template id="inventory-category-tab-template">
+        <button class="inventory-category-tab flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-[#2d284f]/60 text-[#9c94c0] bg-[#141224]/60 transition-colors">
+            <i class="inventory-category-tab-icon text-xs"></i>
+            <span class="inventory-category-tab-label"></span>
+        </button>
+    </template>
+
+    <!-- GIAO DIỆN ĐIỀU KHIỂN TRÊN DI ĐỘNG (MOBILE COMBAT HUD OVERLAY) -->
+    <div id="mobile-controls" class="absolute inset-0 pointer-events-none z-10 hidden">
+        
+        <!-- PARTY SWITCH TẠM THỜI (Pre-Alpha v0.8.5, Bước 1) — hàng nút tối giản, CHƯA style theo
+             Character HUD thật (Bước 2-3 sẽ thay thế hoàn toàn khối này bằng HUD đẹp có avatar/HP bar).
+             Chỉ để bấm test switchToCharacter() trên mobile trong lúc chưa có HUD. -->
+        <div id="party-switch-temp" class="absolute top-20 left-3 flex flex-col gap-2 pointer-events-auto z-30"></div>
+
+        <div id="joystick-container" class="joystick-zone pointer-events-auto">
+            <div id="joystick-handle" class="joystick-handle"></div>
+        </div>
+
+        <button id="mobile-walk-toggle" class="combat-btn absolute pointer-events-auto z-30 flex items-center gap-1.5 px-3 py-1.5 bg-stone-850/80 border border-amber-900/30 rounded-full text-stone-300 shadow-lg select-none" style="bottom: 188px; left: 40px;">
+            <i id="mobile-walk-icon" class="fa-solid fa-person-walking text-sm"></i>
+            <span id="mobile-walk-label" class="text-[10px] font-bold tracking-wide leading-none">WALK</span>
+        </button>
+
+        <div class="absolute bottom-4 right-4 w-52 h-56 pointer-events-none">
+            <button id="mobile-attack-btn" class="combat-btn absolute bottom-0 right-0 w-20 h-20 bg-stone-850/90 border-2 border-stone-700/60 rounded-full flex items-center justify-center text-white pointer-events-auto shadow-2xl z-20">
+                <svg class="w-9 h-9 text-amber-100 opacity-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="14.5" y1="17.5" x2="3" y2="6"></line>
+                    <line x1="13" y1="19" x2="19" y2="13"></line>
+                    <line x1="16" y1="20" x2="20" y2="16"></line>
+                    <line x1="19" y1="21" x2="21" y2="19"></line>
+                    <line x1="10" y1="14" x2="5" y2="9"></line>
+                </svg>
+            </button>
+
+            <button id="mobile-burst-btn" class="combat-btn absolute bottom-0 right-24 w-16 h-16 bg-stone-850/70 border-2 border-stone-850/50 rounded-full flex flex-col items-center justify-center text-stone-500 pointer-events-auto shadow-xl z-20 overflow-hidden transition-all duration-300">
+                <div id="mobile-burst-water" class="absolute bottom-0 left-0 right-0 rounded-b-full pointer-events-none" style="height:0%; background:linear-gradient(to top, rgba(30,77,122,0.65), rgba(110,198,255,0.45)); transition: height 0.18s ease-out;"></div>
+                <div id="mobile-burst-ripple" class="absolute left-0 right-0 h-0.5 pointer-events-none opacity-0" style="background: rgba(110,198,255,0.7); transition: top 0.18s ease-out; top: 50%;"></div>
+                <i class="fa-solid fa-droplet text-xl relative z-10" id="mobile-burst-icon"></i>
+                <span class="text-[7px] font-bold mt-0.5 leading-none relative z-10" id="mobile-burst-label">BURST</span>
+                <span class="text-[7px] font-mono leading-none relative z-10 opacity-70 mt-0.5" id="mobile-burst-energy-text">0/40</span>
+            </button>
+
+            <button id="mobile-dash-btn" class="combat-btn absolute bottom-24 right-0 w-14 h-14 bg-stone-850/90 border-2 border-stone-750/50 rounded-full flex items-center justify-center text-white pointer-events-auto shadow-xl z-20">
+                <i class="fa-solid fa-bolt text-xl opacity-85 text-amber-100"></i>
+            </button>
+
+            <button id="mobile-skill-btn" class="combat-btn absolute bottom-24 right-20 w-14 h-14 bg-stone-850/70 border border-[#3BA3FF]/40 rounded-full flex items-center justify-center text-[#3BA3FF] pointer-events-auto shadow-xl z-20 overflow-hidden">
+                <i class="fa-solid fa-wand-magic-sparkles text-lg opacity-85 text-[#6EC6FF]"></i>
+                <div class="absolute inset-0 bg-[#3BA3FF]/10 animate-pulse"></div>
+                <div id="mobile-cooldown-overlay" class="absolute inset-0 bg-stone-950/85 flex items-center justify-center text-white font-bold text-xs hidden">
+                    <span id="mobile-cooldown-text">5</span>
+                </div>
+            </button>
+
+            <button id="mobile-jump-btn" class="combat-btn absolute bottom-44 right-0 w-14 h-14 bg-stone-850/90 border-2 border-stone-750/50 rounded-full flex items-center justify-center text-white pointer-events-auto shadow-xl z-20">
+                <i class="fa-solid fa-chevron-up text-lg opacity-85 text-amber-100"></i>
+            </button>
+
+            <!-- Nút Drop leo trèo riêng biệt -->
+            <button id="mobile-drop-btn" class="combat-btn absolute bottom-44 right-20 w-14 h-14 bg-stone-850/90 border-2 border-stone-750/50 rounded-full flex flex-col items-center justify-center text-white pointer-events-auto shadow-xl z-20 hidden transition-all">
+                <div class="flex items-center justify-center gap-0.5 mb-0.5">
+                    <i class="fa-solid fa-arrow-down text-lg text-amber-100"></i>
+                </div>
+                <span class="text-[8px] font-bold text-amber-100">DROP</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Script Comic Archive (dữ liệu case + render bookcase động) — không phụ thuộc file nào, load trước -->
+    <script src="scripts/comic.js"></script>
+
+    <!-- Script VFX (particle/hiệu ứng hình ảnh) — không phụ thuộc gameplay, load sớm -->
+    <script src="scripts/vfx.js"></script>
+
+    <!-- Script Enemies (class Enemy, Slime — AI, state machine) — phụ thuộc vfx.js (spawnRunTrail) -->
+    <script src="scripts/enemies.js"></script>
+
+    <!-- Script Game Logic (terrain, physics, camera, animate loop, scene setup) — tách thành 8 file
+         theo khu vực chức năng (game.js gốc đã hơn 5000 dòng). PHẢI giữ ĐÚNG THỨ TỰ dưới đây: đây
+         vốn là 1 file <script> liền mạch duy nhất, chia cắt cơ học tại các ranh giới an toàn (không
+         cắt giữa 1 class/function, không có tham chiếu ngược top-level giữa các phần) — mọi biến
+         dùng chung (player, scene, enemies, campStates...) vẫn là closure top-level chia sẻ NGUYÊN
+         VẸN qua toàn bộ 8 file này, y hệt hành vi khi còn là 1 file game.js duy nhất. Đổi thứ tự
+         hoặc bỏ sót 1 file sẽ gây ReferenceError do tham chiếu biến chưa được khai báo. -->
+    <script src="scripts/game/01-entities-quest-inventory-chest.js"></script>
+    <script src="scripts/game/02-collision-and-stats-core.js"></script>
+    <script src="scripts/game/03-skillstate-camera-collision-helpers.js"></script>
+    <script src="scripts/game/04-scene-init.js"></script>
+    <script src="scripts/game/05-environment-props.js"></script>
+    <script src="scripts/game/06-camps-save-system.js"></script>
+    <script src="scripts/game/07-input-handlers.js"></script>
+    <script src="scripts/game/08-physics-combat-camera-loop.js"></script>
+
+    <!-- Script Combat (Plunge/Attack/Elemental Skill/Burst) — PHẢI load SAU game.js: dùng trực tiếp
+         nhiều biến/hằng số khai báo trong game.js (player, scene, camera, particles, enemies, sfx,
+         cameraState, skillAimState, burstAimState, các CONFIG...). Xem chi tiết ở đầu combat.js. -->
+    <script src="scripts/combat.js"></script>
+
+    <!-- Script UI (menu, HUD, touch controls) — phụ thuộc game.js/combat.js, load sau cùng -->
+    <script src="scripts/ui.js"></script>
+
+    <!-- Script chính: setup DOM refs, settings, khởi tạo -->
+    <script>
+        // --- HỆ THỐNG ĐỊA HÌNH TOÀN CỤC (TERRAIN DEPRESSION LOGIC) ---
+        // Độ sâu Y của "đáy vực" (Void) — nơi player/slime rơi tới sẽ được coi là ra khỏi
+        // vùng chơi hợp lệ và bị dịch chuyển ngược lại lên plane (xem xử lý trong game.js).
+        // Export qua window để game.js (load trước file này) đọc được lúc runtime.
+        const VOID_DEPTH_Y = window.VOID_DEPTH_Y = -100.0;
+
+        // --- CẤU HÌNH TERRAIN (Pre-Alpha v0.3 — Frontier), v0.2 ---
+        // Toàn bộ tham số hình dạng địa hình gom vào đây — game.js đọc lại qua
+        // window.TERRAIN_CONFIG (VD: createWaterAreas() dùng lake.* để đặt đúng vị trí/kích
+        // thước mặt nước khớp với đáy hồ được khoét trong hàm getTerrainHeight bên dưới).
+        //
+        // Nguyên tắc thiết kế (xem thêm comment trong từng hàm áp dụng):
+        //   - structureZones: MẢNG các vùng PHẲNG TUYỆT ĐỐI (cao độ 0) bao quanh các obstacle có AABB
+        //     collision cố định (vách đá leo núi trong game.js/CLIMB_WALL_CONFIGS) — các obstacle này
+        //     đặt Y tuyệt đối giả định mặt đất = 0 tại đó, nên terrain phải giữ phẳng để tránh nổi/lún.
+        //     Ra khỏi zone gần nhất + buffer mới cho phép đồi/noise xuất hiện (chuyển tiếp mượt qua
+        //     smoothstep, không tạo vách dựng). Chỉ 2 zone nhỏ (không còn 1 zone lớn bao trọn giữa map
+        //     như bản trước) — phần lớn map giờ có địa hình tự nhiên, kể cả quanh các Enemy Camp.
+        //   - edgeTaper: gần rìa bản đồ (gần tường Void ở ±50) thì giảm dần chi tiết địa hình về lại
+        //     phẳng — đúng tinh thần "chỉ xây khu vực trung tâm, vùng ngoài chỉ cần terrain cơ bản".
+        //   - hills: các gò đất/đồi thấp rời rạc (dome mượt qua hàm cosine, KHÔNG steep, luôn đi bộ
+        //     được), lấy MAX giữa các đồi chồng nhau (không cộng dồn) để tránh cao độ bất thường.
+        //   - meadowNoise: gợn sóng rất nhẹ (biên độ ~10-15cm) phủ khắp đồng cỏ để không bị phẳng lì.
+        //   - trails: MẢNG các nhánh đường mòn (mỗi nhánh 1 danh sách waypoints riêng), dùng chung
+        //     style (halfWidth/softEdge/dip) — nối Spawn tới từng Enemy Camp + khu hồ, hạ thấp nhẹ +
+        //     làm phẳng cục bộ dọc theo đường (carve theo cao độ NỀN tại chỗ, không phải giá trị tuyệt
+        //     đối — nên trail vẫn ôm theo sườn đồi tự nhiên nếu cắt ngang qua đồi thay vì nổi/chìm bất
+        //     thường). Tại mỗi điểm, chỉ nhánh GẦN NHẤT có ảnh hưởng.
+        //   - lake: hồ nước hình lòng chảo, khoét trực tiếp từ cao độ NỀN tại đúng điểm đó — công
+        //     thức cosine đảm bảo khớp mượt (liên tục bậc 1) với địa hình xung quanh ngay tại rim,
+        //     không cần thêm vùng đệm riêng.
+        const TERRAIN_CONFIG = window.TERRAIN_CONFIG = {
+            structureZones: [
+                // Mở rộng nhẹ so với bản 1-box-đơn trước đây (26-34/-22..-14 và -34..-22/16..28) để
+                // chứa đủ toàn bộ cụm nhiều khối đá xếp lệch (CLIMB_WALL_CONFIGS ở game.js, v0.3
+                // Frontier Iteration 2) — mỗi khối phải đứng trên nền THẬT SỰ phẳng (Y=0 tuyệt đối)
+                // để không bị nổi/lún, kể cả các khối đế nhô ra rìa cụm.
+                { minX: 25, maxX: 35, minZ: -23, maxZ: -13, buffer: 6 },  // Quanh cụm núi đá Camp A
+                { minX: -35, maxX: -22, minZ: 19, maxZ: 25, buffer: 6 }   // Quanh cụm núi đá Camp B
+            ],
+            edgeTaper: { start: 42, end: 49 },
+            hills: [
+                // v0.3 Frontier Iteration 2: tăng height + giảm nhẹ radius để đồi "nhô lên tự nhiên"
+                // rõ ràng hơn (độ dốc tối đa từ ~13-18° lên ~21-26°, vẫn hoàn toàn đi bộ được — tương
+                // đương độ dốc bờ hồ ~25° đã kiểm chứng ổn trước đó), thay vì chỉ đổi cao độ nhẹ như
+                // trước. Đồng bằng (khu vực xa tâm hill) không đổi — vẫn dùng meadowNoise biên độ nhỏ,
+                // giữ đúng yêu cầu "đồng bằng rộng và tương đối phẳng" tương phản với đồi rõ rệt hơn.
+                //
+                // FIX (v0.3 Frontier QA): tâm gốc (-30, 20) nằm LỌT HẲN bên trong structureZones
+                // Zone-CampB (minX:-34..-22, minZ:16..28) — computeStructureFlattenFactor trả về 0
+                // tại đó, khiến TOÀN BỘ đỉnh đồi (vốn cao 2.6 tại tâm) bị ép về 0. Kết quả thực tế:
+                // đồi "biến mất" ở giữa, chỉ còn lại 2 gò nhỏ tách biệt ở 2 bên rìa (quanh x=-38 và
+                // x=-20) — không phải 1 quả đồi liền mạch như comment "Gò đất quanh Camp B" mô tả.
+                // Dịch tâm ra (-42, 20): khoảng cách Chebyshev tới zone = 10m > buffer 6m nên
+                // flattenFactor = 1.00 tại tâm (đồi hiện đầy đủ, không bị cắt cụt); vẫn ở phía Tây
+                // Bắc/gần Camp B đúng tinh thần thiết kế gốc; cách Hill3 (-36,34) khoảng 15m nên 2
+                // sườn đồi nối tiếp nhẹ nhàng thay vì chồng khít bất thường; mép Tây của đồi (x≈-56)
+                // vượt ra ngoài map (-50) nhưng tự động được edgeTaper thoải dần về đất phẳng trước
+                // khi chạm biên — không tạo vách cụt.
+                { x: -42, z: 20, radius: 13, height: 3.4 },
+                { x: -15, z: 32, radius: 10, height: 2.8 },
+                { x: -36, z: 34, radius: 11, height: 3.1 },
+                { x: -10, z: 30, radius: 7,  height: 2.2 },
+                // Gò đất quanh Camp A (Đông) — thoải, không cản đường chiến đấu, chỉ tạo cảm giác
+                // địa hình lên xuống nhẹ khi tiếp cận camp từ spawn.
+                { x: 22, z: -8, radius: 11, height: 2.7 },
+                { x: 28, z: 2, radius: 8, height: 2.1 },
+                // Đồi quanh Camp C (Bắc) — CHỈ tăng height NHẸ (2.2->2.4, 1.5->1.7) và GIỮ NGUYÊN
+                // radius gốc (không giảm như 6 đồi khác) — theo yêu cầu người dùng: tăng đầy đủ như
+                // các đồi khác khiến chênh lệch cao độ trong bán kính rải quái (CAMP_CONFIGS.camp_c,
+                // spawnRadius 6.0) tăng từ 1.97m lên 2.94m (quái spawn lệch cao khá nhiều); mức tăng
+                // nhẹ này giữ chênh lệch ở ~2.24m — gần với mức gốc, vẫn nhích nhẹ theo tinh thần
+                // chung của khu vực.
+                { x: 6, z: 30, radius: 11, height: 2.4 },
+                { x: 14, z: 22, radius: 8, height: 1.7 }
+            ],
+            meadowNoise: { ampA: 0.08, freqAx: 0.13, freqAz: 0.07, ampB: 0.06, freqBx: 0.05, freqBz: 0.11 },
+            // Nhiều nhánh trail (mảng các mảng waypoints) — mỗi nhánh là 1 đường mòn riêng, tất cả dùng
+            // chung trailStyle (halfWidth/softEdge/dip). Nhánh đầu tiên nối spawn dần ra Tây Bắc (khu
+            // hồ/Camp B, giữ nguyên từ trước); 2 nhánh sau rẽ từ gần spawn tới Camp A (Đông) và Camp C
+            // (Bắc) — đúng tinh thần "đường nhỏ dẫn tới Camp" (mục 7 spec).
+            trails: [
+                // v0.3 Frontier Iteration 2: waypoint cuối đổi từ [-38,37] -> [-27.5,31.5] vì hồ mới
+                // (tâm -36,40, radius 10 — tăng từ radius 7, xem giải thích chi tiết ở TERRAIN_CONFIG.
+                // lake) khiến waypoint gốc không còn khớp vị trí bờ hồ. Điểm mới tiếp cận hồ từ hướng
+                // Đông Nam (phía trail đang đi tới), dừng cách tâm hồ 12m (radius+2, đủ đệm để rõ
+                // ràng "tới bờ" chứ không lấn mép nước), đồng thời cách Zone-CampB 6.5m (ngoài vùng
+                // buffer transition, tránh 2 hệ thống mask địa hình giao thoa lộn xộn).
+                { waypoints: [[-6, 20], [-14, 25], [-22, 29], [-27.5, 31.5]] }, // Spawn -> Hồ/Camp B
+                { waypoints: [[4, -2], [12, -5], [18, -7], [24, -9]] },                  // Spawn -> Camp A
+                { waypoints: [[2, 6], [4, 14], [6, 20], [8, 25]] },                      // Spawn -> Camp C
+                // v0.6 Wilderness: nhánh mới dẫn về hướng Tây Nam, kết thúc ngay rìa khu rừng mới
+                // (FOREST_CONFIGS.forest_west, tâm (-22,-28) bán kính 17 — điểm cuối [-16,-19] cách tâm
+                // rừng ~11.7m, tức đã ở BÊN TRONG rìa rừng ~5m, đưa người chơi "bước vào" rừng ngay khi
+                // hết trail thay vì dừng ở ngoài).
+                { waypoints: [[-4, -6], [-10, -13], [-14, -19], [-16, -19]] }            // Spawn -> Forest
+            ],
+            trailStyle: { halfWidth: 1.8, softEdge: 1.8, dip: 0.15 },
+            // v0.3 Frontier Iteration 2: tăng hồ đường kính + độ sâu theo yêu cầu.
+            // LƯU Ý QUAN TRỌNG (đã sửa sau khi phát hiện sai số): bán kính "gấp đôi tuyệt đối"
+            // (7->14) và cả mức trung gian (radius=12) đều KHÔNG an toàn — kiểm tra ban đầu chỉ xét
+            // khoảng cách từ TÂM hồ tới structureZones Zone-CampB (dùng công thức Chebyshev), nhưng
+            // không đảm bảo TOÀN BỘ đường viền tròn của hồ cũng đủ xa, vì zone là HÌNH CHỮ NHẬT nên
+            // khoảng cách Euclid thực tế không đều quanh 360° như với tâm-bán kính đơn thuần. Với
+            // radius=12, kiểm tra lại toàn bộ rim (quét 360°) phát hiện 1 điểm ở hướng Nam chỉ cách
+            // zone 1m (flattenFactor~0.07) — gần như đào đáy hồ xuyên vào nền phẳng cưỡng bức của
+            // zone tại đó. Sau khi quét lại đúng theo toàn bộ rim: radius=10 là mức tối đa thực sự an
+            // toàn (flattenFactor tối thiểu trên toàn rim = 0.93, không đáng chú ý) — đường kính 20,
+            // tăng 43% so với gốc 14 (chưa đạt "gần gấp đôi" như dự định ban đầu, nhưng đây là giới
+            // hạn thực tế của không gian Tây Bắc map với 2 ràng buộc cứng: biên Void ±50 và
+            // structureZones quanh cụm núi đá). Tâm dịch xa hơn nữa lên (-36,40) để có đủ khoảng đệm.
+            // depth tăng 2.2->3.2 để giữ độ dốc bờ hồ tương đương mức cũ (~25°, đã kiểm chứng ổn định).
+            lake: { x: -36, z: 40, radius: 10, depth: 3.2 }
+        };
+
+        // Hermite smoothstep chuẩn — dùng khắp hệ terrain để mọi chuyển tiếp (flatten zone, edge
+        // taper, mép đồi, mép trail) đều liên tục bậc 1 (không có vết gãy/vách nhìn thấy được).
+        function smoothstep01(edge0, edge1, x) {
+            const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+            return t * t * (3 - 2 * t);
+        }
+
+        // 0 bên trong BẤT KỲ structureZone nào (bắt buộc phẳng), tăng dần lên 1 sau khi ra khỏi zone
+        // gần nhất thêm đúng `buffer` mét — dùng khoảng cách kiểu Chebyshev (max của lệch X và lệch Z)
+        // vì mỗi zone là hình chữ nhật: chỉ cần lệch xa ở MỘT trục là đã đủ coi là "ra khỏi zone". Với
+        // nhiều zone, lấy factor NHỎ NHẤT (tức gần zone nào nhất thì bị chi phối bởi zone đó) — đảm bảo
+        // 1 điểm nằm trong/gần bất kỳ zone nào cũng được ép phẳng đúng, không bị zone khác "che".
+        function computeStructureFlattenFactor(x, z) {
+            let minFactor = 1;
+            for (const s of TERRAIN_CONFIG.structureZones) {
+                const dx = Math.max(s.minX - x, 0, x - s.maxX);
+                const dz = Math.max(s.minZ - z, 0, z - s.maxZ);
+                const d = Math.max(dx, dz);
+                const factor = smoothstep01(0, s.buffer, d);
+                if (factor < minFactor) minFactor = factor;
+            }
+            return minFactor;
+        }
+
+        // 1 trong phạm vi chơi chính, giảm dần về 0 khi tới gần tường Void ở ±50.
+        function computeEdgeTaperFactor(x, z) {
+            const e = TERRAIN_CONFIG.edgeTaper;
+            const dist = Math.max(Math.abs(x), Math.abs(z));
+            return 1 - smoothstep01(e.start, e.end, dist);
+        }
+
+        // Dome mượt (cosine falloff) — 0 tại/ngoài radius, cao nhất tại tâm, đạo hàm = 0 ở cả 2 đầu
+        // (tâm và rim) nên không tạo đỉnh nhọn hay vết gãy khi nối với mặt đất phẳng xung quanh.
+        function hillBumpHeight(x, z, hill) {
+            const d = Math.hypot(x - hill.x, z - hill.z);
+            if (d >= hill.radius) return 0;
+            const t = d / hill.radius;
+            return hill.height * 0.5 * (1 + Math.cos(Math.PI * t));
+        }
+
+        // Gợn sóng rất nhẹ cho đồng cỏ — 2 sóng sin tần số lệch nhau (tỉ lệ không phải số nguyên)
+        // để tránh lặp lại thành hoạ tiết nhìn thấy được.
+        function subtleMeadowNoise(x, z) {
+            const n = TERRAIN_CONFIG.meadowNoise;
+            return Math.sin(x * n.freqAx + z * n.freqAz) * n.ampA +
+                   Math.sin(x * n.freqBx - z * n.freqBz) * n.ampB;
+        }
+
+        // Khoảng cách từ (x,z) tới đoạn thẳng gần nhất trong 1 chuỗi waypoint (dùng cho trail).
+        function distanceToPolyline(x, z, waypoints) {
+            let best = Infinity;
+            for (let i = 0; i < waypoints.length - 1; i++) {
+                const [ax, az] = waypoints[i];
+                const [bx, bz] = waypoints[i + 1];
+                const abx = bx - ax, abz = bz - az;
+                const apx = x - ax, apz = z - az;
+                const abLenSq = abx * abx + abz * abz;
+                let t = abLenSq > 0 ? (apx * abx + apz * abz) / abLenSq : 0;
+                t = Math.min(1, Math.max(0, t));
+                const cx = ax + abx * t, cz = az + abz * t;
+                const dist = Math.hypot(x - cx, z - cz);
+                if (dist < best) best = dist;
+            }
+            return best;
+        }
+
+        // Hạ thấp + làm phẳng nhẹ dọc theo đường mòn GẦN NHẤT trong số nhiều nhánh trail. `baseHeight`
+        // là cao độ NỀN tại chính điểm (x,z) này (đã tính đồi + noise + mask) — trail carve TƯƠNG ĐỐI
+        // so với nền đó, nên nếu đường mòn cắt ngang sườn đồi, nó vẫn ôm theo độ dốc tự nhiên thay vì
+        // tạo mặt phẳng tuyệt đối lơ lửng/lún so với địa hình xung quanh. Với nhiều nhánh, chỉ nhánh
+        // GẦN NHẤT tại điểm đó có ảnh hưởng — tránh 2 nhánh gần nhau cộng dồn carve sâu bất thường.
+        function applyTrailDip(x, z, baseHeight) {
+            const style = TERRAIN_CONFIG.trailStyle;
+            let bestDist = Infinity;
+            for (const trail of TERRAIN_CONFIG.trails) {
+                const d = distanceToPolyline(x, z, trail.waypoints);
+                if (d < bestDist) bestDist = d;
+            }
+            const outerEdge = style.halfWidth + style.softEdge;
+            if (bestDist >= outerEdge) return baseHeight;
+            const trailHeight = baseHeight - style.dip;
+            if (bestDist <= style.halfWidth) return trailHeight;
+            const t = smoothstep01(style.halfWidth, outerEdge, bestDist);
+            return trailHeight * (1 - t) + baseHeight * t;
+        }
+
+        // Khoét lòng hồ trực tiếp từ cao độ NỀN tại điểm (x,z). Tại đúng rim (d = radius), công
+        // thức cosine cho kết quả = baseHeight (khớp mượt, liên tục bậc 1) — không cần vùng đệm
+        // riêng để nối với địa hình xung quanh.
+        function applyLakeBasin(x, z, baseHeight) {
+            const lake = TERRAIN_CONFIG.lake;
+            const d = Math.hypot(x - lake.x, z - lake.z);
+            if (d >= lake.radius) return baseHeight;
+            const t = d / lake.radius;
+            const smooth = t * t * (3 - 2 * t);
+            return baseHeight - lake.depth * (1 - smooth);
+        }
+
+        // Cao độ NỀN (đồi + noise, đã áp mask flatten-zone/edge-taper) TRƯỚC KHI khoét trail/hồ.
+        // Export riêng để game.js (createWaterAreas) có thể lấy đúng cao độ "bờ hồ" khi đặt mặt
+        // nước, thay vì đoán 1 con số cố định dễ lệch nếu sau này chỉnh lại đồi quanh hồ.
+        function computeBaseTerrain(x, z) {
+            const detailFactor = computeStructureFlattenFactor(x, z) * computeEdgeTaperFactor(x, z);
+            let hillsHeight = 0;
+            for (const hill of TERRAIN_CONFIG.hills) {
+                hillsHeight = Math.max(hillsHeight, hillBumpHeight(x, z, hill));
+            }
+            return (hillsHeight + subtleMeadowNoise(x, z)) * detailFactor;
+        }
+        window.getTerrainBaseHeight = computeBaseTerrain;
+
+        function getTerrainHeight(x, z) {
+            // Giới hạn mặt đất vật lý trong phạm vi Plane 100x100 (-50 đến 50)
+            // Bên ngoài phạm vi này là vùng trống (Void).
+            if (x < -50 || x > 50 || z < -50 || z > 50) {
+                return VOID_DEPTH_Y;
+            }
+            let height = computeBaseTerrain(x, z);
+            height = applyTrailDip(x, z, height);
+            height = applyLakeBasin(x, z, height);
+            return height;
+        }
+
+        // --- HỆ THỐNG COMIC TEXT STORY ARCHIVE ---
+        // COMIC_CASES và renderComicBookcase() đã tách sang comic.js (load trước ui.js).
+
+        // --- HỆ THỐNG QUẢN LÝ TRẠNG THÁI WINDOW TRUNG TÂM (v0.8.0) ---
+        // activeWindow, openStoryReader(), closeStoryReader() đã chuyển sang ui.js
+
+        window.onload = function() {
+            window.container = document.getElementById('canvas-container');
+            const container = window.container;
+            const mobileControls = document.getElementById('mobile-controls');
+            const desktopHud = document.getElementById('desktop-hud');
+
+            // Các Element Metrics (posDisplay, physicsDisplay, dashStateTag, staminaStateTag,
+            // energyDisplay, hpFill, hpText, desktopClimbHint, mobileDropBtn) đã chuyển
+            // sang ui.js (syncHUDVariables) — không cần khai báo lại ở đây.
+
+            // Stamina HTML elements
+            const staminaContainer = window.staminaContainer = document.getElementById('stamina-container');
+            const staminaRing = window.staminaRing = document.getElementById('stamina-ring');
+
+            // --- Menu & Settings State Variables ---
+            // isGamePaused sống trên window vì ui.js (togglePauseMenu) gán lại giá trị này.
+            // Toàn bộ code phía dưới trong file này phải đọc "window.isGamePaused",
+            // KHÔNG copy ra biến const/let cục bộ, nếu không sẽ đọc giá trị cũ (stale).
+            window.isGamePaused = false;
+            let cameraSensitivityMultiplier = 1.0;
+            Object.defineProperty(window, 'cameraSensitivityMultiplier', {
+                get() { return cameraSensitivityMultiplier; },
+                set(v) { cameraSensitivityMultiplier = v; },
+                configurable: true
+            });
+
+            // scene, camera, renderer, groundMat được gán giá trị thật bên trong initThree()
+            // (nằm trong game.js) — khai báo ở đây và export qua window để 2 file dùng chung.
+            let scene, camera, renderer, groundMat;
+            window.clock = new THREE.Clock();
+            const clock = window.clock;
+            Object.defineProperty(window, 'scene', { get: () => scene, set: (v) => { scene = v; }, configurable: true });
+            Object.defineProperty(window, 'camera', { get: () => camera, set: (v) => { camera = v; }, configurable: true });
+            Object.defineProperty(window, 'renderer', { get: () => renderer, set: (v) => { renderer = v; }, configurable: true });
+            Object.defineProperty(window, 'groundMat', { get: () => groundMat, set: (v) => { groundMat = v; }, configurable: true });
+
+            window.isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+            const isMobile = window.isMobile;
+            if (isMobile) {
+                mobileControls.classList.remove('hidden');
+                desktopHud.classList.add('hidden');
+            } else {
+                mobileControls.classList.add('hidden');
+                desktopHud.classList.remove('hidden');
+            }
+
+            // --- Menu Logic Setup (Paimon-inspired Tab & Overlay) ---
+            window.closeMenuBtn = document.getElementById('close-menu-btn');
+            window.gameMenu = document.getElementById('game-menu');
+            window.leftPanel = document.getElementById('menu-left-panel');
+            window.backdropClose = document.getElementById('menu-backdrop-close');
+            const closeMenuBtn = window.closeMenuBtn;
+            const gameMenu = window.gameMenu;
+            const leftPanel = window.leftPanel;
+            const backdropClose = window.backdropClose;
+            
+            // Sub-sections
+            const menuGridView = document.getElementById('menu-grid-view');
+            const menuContentSettings = document.getElementById('menu-content-settings');
+            const menuContentInfo = document.getElementById('menu-content-info');
+            const menuContentComic = document.getElementById('menu-content-comic');
+            const menuContentSkills = document.getElementById('menu-content-skills-overview');
+
+            window.openMenuSubSection = function(sectionId) {
+                // Hide all sub-sections in the sub window
+                const subSections = ['settings', 'info', 'comic', 'skills-overview', 'inventory', 'character', 'locked'];
+                subSections.forEach(s => {
+                    const el = document.getElementById('menu-content-' + s);
+                    if (el) el.classList.add('hidden');
+                });
+
+                let title = "Travel Journal";
+                const validSections = ['settings', 'info', 'comic', 'skills-overview', 'inventory', 'character'];
+
+                if (validSections.includes(sectionId)) {
+                    const targetEl = document.getElementById('menu-content-' + sectionId);
+                    if (targetEl) targetEl.classList.remove('hidden');
+                    if (sectionId === 'settings') title = "System Settings";
+                    else if (sectionId === 'info') title = "Diagnostics & Archives";
+                    else if (sectionId === 'comic') {
+                        title = "Devlog Case Archives";
+                        // Đảm bảo đưa trang comic về giao diện chính của danh sách (menu-content-comic
+                        // đã được remove('hidden') ở trên vì nằm trong subSections/targetEl).
+                        const readerPage = document.getElementById('comic-story-reader');
+                        if (readerPage) readerPage.classList.add('hidden');
+                    }
+                    else if (sectionId === 'skills-overview') title = "Hydro Talents Overview";
+                    else if (sectionId === 'inventory') {
+                        title = "Inventory";
+                        // Render lại toàn bộ tab + grid mỗi lần mở — đảm bảo luôn khớp state Inventory
+                        // mới nhất (VD người chơi vừa nhặt thêm vật phẩm trước khi mở menu).
+                        if (window.renderInventoryCategoryTabs) window.renderInventoryCategoryTabs();
+                    }
+                    else if (sectionId === 'character') {
+                        title = "Character";
+                        // Render lại toàn bộ Character Screen mỗi lần mở — đảm bảo luôn khớp state mới
+                        // nhất (level/exp/stats có thể đã đổi từ lần mở trước, VD vừa lên level).
+                        if (window.renderCharacterScreen) window.renderCharacterScreen();
+                    }
+                    
+                    activeWindow = sectionId;
+                } else {
+                    // Show custom coming soon screen
+                    const lockedEl = document.getElementById('menu-content-locked');
+                    if (lockedEl) lockedEl.classList.remove('hidden');
+                    const lockedTitle = document.getElementById('locked-feature-title');
+                    if (lockedTitle) lockedTitle.textContent = sectionId.toUpperCase() + " SYSTEM";
+                    title = sectionId.toUpperCase() + " ARCHIVES";
+                    
+                    activeWindow = 'locked';
+                }
+
+                // Update Title
+                const titleEl = document.getElementById('sub-window-title');
+                if (titleEl) titleEl.textContent = title;
+
+                // Slide Left Sidebar Out
+                if (leftPanel) leftPanel.classList.add('-translate-x-full');
+
+                // Slide Sub Window In
+                const subWin = document.getElementById('rpg-sub-window');
+                const subWinPanel = document.getElementById('rpg-sub-window-panel');
+                if (subWin && subWinPanel) {
+                    subWin.classList.remove('opacity-0', 'pointer-events-none');
+                    subWinPanel.classList.remove('translate-y-8');
+                }
+            };
+
+            // closeSubWindow, handleBackNavigation, closeMenuSubSection,
+            // showGridFeatureNotification, togglePauseMenu, backdrop/close/paimonStar
+            // event wiring đã chuyển sang ui.js (xem initMenuButtons()).
+
+            // --- Custom Touch Slider Logic cho Mobile UX ---
+            const camSensSlider = document.getElementById('cam-sens-slider');
+            const camSensValue = document.getElementById('cam-sens-value');
+            
+            if (camSensSlider && camSensValue) {
+                camSensSlider.addEventListener('input', (e) => {
+                    const val = e.target.value;
+                    camSensValue.textContent = val + '%';
+                    cameraSensitivityMultiplier = val / 100;
+                    // Infrastructure Update #1 — Save System (yêu cầu bổ sung: lưu Settings) —
+                    // requestSave() đã có debounce 300ms sẵn (game.js), phù hợp để gọi trực tiếp mỗi
+                    // lần input mà không cần debounce riêng ở đây.
+                    if (window.requestSave) window.requestSave();
+                });
+
+                const updateSliderFromTouch = (clientX) => {
+                    const rect = camSensSlider.getBoundingClientRect();
+                    let percent = (clientX - rect.left) / rect.width;
+                    percent = Math.max(0, Math.min(1, percent));
+                    
+                    const min = parseFloat(camSensSlider.min) || 10;
+                    const max = parseFloat(camSensSlider.max) || 300;
+                    const val = Math.round(min + percent * (max - min));
+                    
+                    camSensSlider.value = val;
+                    camSensValue.textContent = val + '%';
+                    cameraSensitivityMultiplier = val / 100;
+                    // touchmove bắn liên tục nhiều lần/giây khi đang kéo — requestSave() debounce sẵn
+                    // gộp lại thành 1 lần ghi thực tế sau khi ngón tay dừng, an toàn để gọi mỗi lần.
+                    if (window.requestSave) window.requestSave();
+                };
+
+                camSensSlider.addEventListener('touchstart', (e) => {
+                    e.stopPropagation(); 
+                    updateSliderFromTouch(e.touches[0].clientX);
+                }, { passive: true });
+
+                camSensSlider.addEventListener('touchmove', (e) => {
+                    e.stopPropagation(); 
+                    e.preventDefault(); 
+                    updateSliderFromTouch(e.touches[0].clientX);
+                }, { passive: false });
+
+                camSensSlider.addEventListener('touchend', (e) => {
+                    e.stopPropagation();
+                }, { passive: true });
+            }
+
+            // Infrastructure Update #1 — Save System (yêu cầu bổ sung: lưu Settings) — gọi bởi
+            // applySaveData() (game.js) SAU KHI đã ghi window.cameraSensitivityMultiplier từ save data.
+            // Chỉ lo đồng bộ UI (slider value + text hiển thị) cho khớp với giá trị vừa khôi phục —
+            // game.js không có tham chiếu tới camSensSlider/camSensValue (khai báo cục bộ ở đây), nên
+            // việc đồng bộ DOM phải do chính index.html tự làm qua callback này, cùng pattern với
+            // window.onInventoryItemAdded/window.onItemGathered đã dùng xuyên suốt dự án.
+            window.onSettingsRestored = function (settings) {
+                if (typeof settings.cameraSensitivity === 'number' && camSensSlider && camSensValue) {
+                    camSensSlider.value = settings.cameraSensitivity;
+                    camSensValue.textContent = settings.cameraSensitivity + '%';
+                }
+            };
+
+            const playtestMetrics = window.playtestMetrics = {
+                jumps: 0,
+                totalDistance: 0,
+                lastPosition: new THREE.Vector3()
+            };
+
+            class SoundFX {
+                constructor() { this.ctx = null; }
+                init() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+                
+                playSwing() {
+                    this.init();
+                    if (this.ctx.state === 'suspended') this.ctx.resume();
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.connect(gain); gain.connect(this.ctx.destination);
+                    const now = this.ctx.currentTime;
+                    osc.frequency.setValueAtTime(900, now);
+                    osc.frequency.exponentialRampToValueAtTime(150, now + 0.15);
+                    gain.gain.setValueAtTime(0.18, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                    osc.start(now); osc.stop(now + 0.15);
+                }
+                playHit() {
+                    this.init();
+                    if (this.ctx.state === 'suspended') this.ctx.resume();
+                    const now = this.ctx.currentTime;
+                    const bufferSize = this.ctx.sampleRate * 0.1; 
+                    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                    const data = buffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+                    const noise = this.ctx.createBufferSource(); noise.buffer = buffer;
+                    const filter = this.ctx.createBiquadFilter(); filter.type = 'bandpass'; filter.frequency.setValueAtTime(450, now);
+                    const gain = this.ctx.createGain();
+                    gain.gain.setValueAtTime(0.5, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                    noise.connect(filter); filter.connect(gain); gain.connect(this.ctx.destination);
+                    noise.start(now); noise.stop(now + 0.1);
+
+                    const punch = this.ctx.createOscillator();
+                    const punchGain = this.ctx.createGain();
+                    punch.connect(punchGain); punchGain.connect(this.ctx.destination);
+                    punch.frequency.setValueAtTime(160, now);
+                    punch.frequency.exponentialRampToValueAtTime(40, now + 0.07);
+                    punchGain.gain.setValueAtTime(0.6, now);
+                    punchGain.gain.exponentialRampToValueAtTime(0.01, now + 0.07);
+                    punch.start(now); punch.stop(now + 0.07);
+                }
+                playHydroShot() {
+                    this.init();
+                    if (this.ctx.state === 'suspended') this.ctx.resume();
+                    const now = this.ctx.currentTime;
+                    const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
+                    osc.type = 'sine'; osc.frequency.setValueAtTime(900, now); osc.frequency.exponentialRampToValueAtTime(480, now + 0.08);
+                    gain.gain.setValueAtTime(0.18, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+                    osc.connect(gain); gain.connect(this.ctx.destination); osc.start(now); osc.stop(now + 0.12);
+                }
+                playHydroSplash() {
+                    this.init();
+                    if (this.ctx.state === 'suspended') this.ctx.resume();
+                    const now = this.ctx.currentTime;
+                    const bSize = Math.floor(this.ctx.sampleRate * 0.12);
+                    const buf = this.ctx.createBuffer(1, bSize, this.ctx.sampleRate);
+                    const d = buf.getChannelData(0);
+                    for (let i = 0; i < bSize; i++) d[i] = Math.random() * 2 - 1;
+                    const noise = this.ctx.createBufferSource(); noise.buffer = buf;
+                    const filt = this.ctx.createBiquadFilter(); filt.type = 'lowpass';
+                    filt.frequency.setValueAtTime(1800, now); filt.frequency.exponentialRampToValueAtTime(400, now + 0.1);
+                    const nGain = this.ctx.createGain();
+                    nGain.gain.setValueAtTime(0.28, now); nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+                    noise.connect(filt); filt.connect(nGain); nGain.connect(this.ctx.destination);
+                    noise.start(now); noise.stop(now + 0.12);
+                }
+                playBurst() {
+                    this.init();
+                    if (this.ctx.state === 'suspended') this.ctx.resume();
+                    const now = this.ctx.currentTime;
+                    const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
+                    osc.type = 'sine'; osc.frequency.setValueAtTime(180, now); osc.frequency.exponentialRampToValueAtTime(80, now + 0.6);
+                    gain.gain.setValueAtTime(0.0, now); gain.gain.linearRampToValueAtTime(0.35, now + 0.05); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+                    osc.connect(gain); gain.connect(this.ctx.destination); osc.start(now); osc.stop(now + 0.6);
+
+                    const bSize = this.ctx.sampleRate * 0.5;
+                    const buf = this.ctx.createBuffer(1, bSize, this.ctx.sampleRate);
+                    const d = buf.getChannelData(0);
+                    for (let i = 0; i < bSize; i++) d[i] = Math.random() * 2 - 1;
+                    const noise = this.ctx.createBufferSource(); noise.buffer = buf;
+                    const filt = this.ctx.createBiquadFilter(); filt.type = 'bandpass'; filt.frequency.setValueAtTime(600, now); filt.frequency.exponentialRampToValueAtTime(200, now + 0.5);
+                    const nGain = this.ctx.createGain(); nGain.gain.setValueAtTime(0.22, now); nGain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+                    noise.connect(filt); filt.connect(nGain); nGain.connect(this.ctx.destination);
+                    noise.start(now); noise.stop(now + 0.5);
+                }
+                playDashWhoosh() {
+                    this.init();
+                    if (this.ctx.state === 'suspended') this.ctx.resume();
+                    const now = this.ctx.currentTime;
+                    const duration = 0.25; const bufferSize = this.ctx.sampleRate * duration;
+                    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                    const data = buffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+                    const noise = this.ctx.createBufferSource(); noise.buffer = buffer;
+                    const filter = this.ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.setValueAtTime(150, now); filter.frequency.exponentialRampToValueAtTime(1400, now + 0.12); filter.frequency.exponentialRampToValueAtTime(250, now + duration);
+                    const gain = this.ctx.createGain(); gain.gain.setValueAtTime(0.3, now); gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+                    noise.connect(filter); filter.connect(gain); gain.connect(this.ctx.destination);
+                    noise.start(now); noise.stop(now + duration);
+                }
+                playBlockedSound() {
+                    this.init();
+                    if (this.ctx.state === 'suspended') this.ctx.resume();
+                    const now = this.ctx.currentTime;
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(160, now);
+                    osc.frequency.setValueAtTime(110, now + 0.08);
+                    gain.gain.setValueAtTime(0.18, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.16);
+                    osc.connect(gain); gain.connect(this.ctx.destination);
+                    osc.start(now); osc.stop(now + 0.16);
+                }
+            }
+            const sfx = window.sfx = new SoundFX();
+
+            // ============================================================
+            // MUSIC MANAGER — Quản lý nhạc nền (bg_ost) và nhạc combat (combat_ost)
+            // ============================================================
+            // ĐƯỜNG DẪN FILE: sinh TỰ ĐỘNG bằng vòng lặp, dựa trên SỐ LƯỢNG file bạn tự khai báo ở
+            // BG_OST_QUANTITY / COMBAT_OST_QUANTITY bên dưới — mỗi thư mục 1 con số riêng vì số
+            // lượng file có thể khác nhau. Đây là bản JS tương đương với vòng lặp Python:
+            //     list = []
+            //     for i in range(quantity):
+            //         list.append(f"ost{i}.mp3")
+            // (JS bên dưới bắt đầu từ 1 thay vì 0, khớp với quy ước đặt tên ost1, ost2,... đã dùng
+            // trong project — KHÔNG bắt đầu từ ost0).
+            //
+            // KHÔNG còn dò qua mạng (fetch/Audio) nữa — lý do: trình duyệt không có cách đáng tin cậy
+            // để "đếm" file trong 1 thư mục, và trên môi trường chạy game không phải server chuẩn
+            // (VD: JoiPlay dùng WebView đọc file cục bộ, không phải HTTP server thật) mọi cách dò qua
+            // mạng đều có thể cho kết quả sai (VD: luôn báo "có" bất kể file thật sự tồn tại hay
+            // không). Cách bằng vòng lặp này không phụ thuộc gì vào hành vi server/runtime — CHỈ CẦN
+            // 2 CON SỐ ĐÚNG, chạy ở đâu cũng cho kết quả giống nhau 100%.
+            //
+            // MỖI KHI THÊM/BỚT FILE NHẠC: chỉ cần sửa lại đúng 1 con số tương ứng bên dưới.
+            const BG_OST_QUANTITY = 9;      // Số file trong assets/audio/bg_ost/ (ost1.mp3 .. ost{N}.mp3)
+            const COMBAT_OST_QUANTITY = 8;  // Số file trong assets/audio/combat_ost/ (ost1.mp3 .. ost{N}.mp3)
+
+            const AUDIO_FOLDER_CONFIG = {
+                bg: { folder: 'assets/audio/bg_ost', prefix: 'ost', quantity: BG_OST_QUANTITY },
+                combat: { folder: 'assets/audio/combat_ost', prefix: 'ost', quantity: COMBAT_OST_QUANTITY }
+            };
+
+            // Sinh danh sách đường dẫn đầy đủ từ 1 config { folder, prefix, quantity } — vòng lặp
+            // JS tương đương hàm Python bạn đưa, chỉ khác đánh số bắt đầu từ 1 (ost1) thay vì 0.
+            function buildTrackList(config) {
+                const list = [];
+                for (let i = 1; i <= config.quantity + 1; i++) {
+                    list.push(`${config.folder}/${config.prefix}${i}.mp3`);
+                }
+                return list;
+            }
+
+            // BG_TRACKS/COMBAT_TRACKS — MusicManager bên dưới đọc trực tiếp 2 mảng này mỗi lần random
+            // 1 bài. Sinh 1 lần duy nhất lúc script chạy, KHÔNG bất đồng bộ — có ngay lập tức, không
+            // cần chờ mạng như cách dò cũ.
+            let BG_TRACKS = buildTrackList(AUDIO_FOLDER_CONFIG.bg);
+            let COMBAT_TRACKS = buildTrackList(AUDIO_FOLDER_CONFIG.combat);
+
+            // Cấu hình tập trung — dễ chỉnh lại sau này, không hard-code rải rác.
+            const MUSIC_CONFIG = {
+                normalVolume: 0.5,       // Mức âm lượng "bình thường" khi nhạc đã fade-in xong
+                fadeInDuration: 2.0,     // Giây — thời gian fade-in (âm lượng nhỏ -> lớn)
+                fadeOutDuration: 2.0,    // Giây — thời gian fade-out (âm lượng lớn -> nhỏ -> tắt)
+                combatResetDelay: 10.0,  // Giây sau khi hết combat: nếu vượt mốc này, combat_ost reset về đầu bài (và random bài mới)
+                bgStartDelay: 15.0       // Giây sau khi hết combat (hoặc từ lúc bắt đầu game/respawn): bắt đầu phát bg_ost
+            };
+
+            // Chọn ngẫu nhiên 1 đường dẫn từ danh sách; trả về '' nếu danh sách rỗng.
+            function pickRandomTrack(trackList) {
+                if (!trackList || trackList.length === 0) return '';
+                return trackList[Math.floor(Math.random() * trackList.length)];
+            }
+
+            class MusicManager {
+                constructor() {
+                    // bgAudio/combatAudio được tạo (new Audio) mỗi khi cần random bài mới —
+                    // xem _loadRandomBg()/_loadRandomCombat(). Ban đầu để null, chưa có gì để phát.
+                    this.bgAudio = null;
+                    this.combatAudio = null;
+
+                    // --- State ---
+                    this.inCombat = false;              // true nếu hiện có ít nhất 1 slime đã phát hiện player
+                    this.afterCombatTimer = 0;           // Đếm giây kể từ lúc kết thúc combat gần nhất (hoặc từ lúc bắt đầu game/respawn)
+                    this.isCountingAfterCombat = false;  // Đang trong giai đoạn đếm hay không
+                    this.combatResetDone = false;        // Đã reset+random lại combat_ost ở mốc 10s chưa (tránh lặp lại nhiều lần)
+                    this.bgStarted = false;               // Đã bắt đầu phát bg_ost ở mốc 15s chưa (tránh gọi lại nhiều lần)
+
+                    // --- Fade state (dùng chung 1 cơ chế fade cho cả 2 track) ---
+                    this._fade = { audio: null, elapsed: 0, duration: 0, fromVol: 0, toVol: 0, onComplete: null };
+
+                    // Kích hoạt đếm afterCombat NGAY TỪ LÚC BẮT ĐẦU GAME — coi như một "kỳ nghỉ combat"
+                    // đang chạy sẵn, để nếu 15s đầu game không có combat nào thì bg_ost tự bật.
+                    this._resetAfterCombatCounter();
+                }
+
+                // Dừng hẳn 1 audio element (không fade), reset volume về 0.
+                _hardStop(audio) {
+                    if (!audio) return;
+                    audio.pause();
+                    audio.volume = 0;
+                }
+
+                // Tạo mới bgAudio với 1 bài random từ BG_TRACKS, thay thế bgAudio cũ (nếu có, dừng hẳn trước).
+                _loadRandomBg() {
+                    this._hardStop(this.bgAudio);
+                    const src = pickRandomTrack(BG_TRACKS);
+                    if (!src) { this.bgAudio = null; return; }
+                    this.bgAudio = new Audio(src);
+                    this.bgAudio.loop = true;
+                    this.bgAudio.volume = 0;
+                }
+
+                // Tạo mới combatAudio với 1 bài random từ COMBAT_TRACKS, thay thế combatAudio cũ.
+                _loadRandomCombat() {
+                    this._hardStop(this.combatAudio);
+                    const src = pickRandomTrack(COMBAT_TRACKS);
+                    if (!src) { this.combatAudio = null; return; }
+                    this.combatAudio = new Audio(src);
+                    this.combatAudio.loop = true;
+                    this.combatAudio.volume = 0;
+                }
+
+                // Bắt đầu fade âm lượng của 1 audio element theo thời gian (gọi mỗi frame qua update()).
+                _startFade(audio, toVolume, duration, onComplete) {
+                    if (!audio) { if (onComplete) onComplete(); return; }
+                    this._fade = {
+                        audio, elapsed: 0, duration: Math.max(0.001, duration),
+                        fromVol: audio.volume, toVol: toVolume,
+                        onComplete: onComplete || null
+                    };
+                }
+
+                _updateFade(dt) {
+                    const f = this._fade;
+                    if (!f.audio) return;
+                    f.elapsed += dt;
+                    const t = Math.min(1, f.elapsed / f.duration);
+                    f.audio.volume = f.fromVol + (f.toVol - f.fromVol) * t;
+                    if (t >= 1) {
+                        const cb = f.onComplete;
+                        this._fade = { audio: null, elapsed: 0, duration: 0, fromVol: 0, toVol: 0, onComplete: null };
+                        if (cb) cb();
+                    }
+                }
+
+                // Đưa afterCombatTimer về trạng thái "vừa bắt đầu đếm lại" — dùng chung cho: lúc khởi tạo
+                // game, sau khi thoát combat, và sau khi player chết.
+                _resetAfterCombatCounter() {
+                    this.isCountingAfterCombat = true;
+                    this.afterCombatTimer = 0;
+                    this.combatResetDone = false;
+                    this.bgStarted = false;
+                }
+
+                // Gọi khi in_combat chuyển false -> true: fade-in combat_ost.
+                // Nếu còn trong giai đoạn "after combat <= 10s" (chưa bị reset), resume đúng bài + currentTime cũ.
+                // Ngược lại (đã quá 10s, hoặc lần đầu chưa từng có bài nào): random bài mới, phát từ đầu.
+                _enterCombat() {
+                    const canResume = this.combatAudio && !this.combatResetDone && this.isCountingAfterCombat;
+                    if (!canResume) {
+                        this._loadRandomCombat(); // Random bài mới + phát từ đầu (currentTime mặc định = 0)
+                    }
+                    if (this.combatAudio) {
+                        this.combatAudio.play().catch(() => {}); // catch: tránh lỗi autoplay-policy chặn play()
+                        this._startFade(this.combatAudio, MUSIC_CONFIG.normalVolume, MUSIC_CONFIG.fadeInDuration);
+                    }
+                    // Tắt hẳn bg_ost ngay lập tức nếu đang phát (không crossfade theo yêu cầu)
+                    this._hardStop(this.bgAudio);
+                    this.bgStarted = false;
+                    this.isCountingAfterCombat = false;
+                    this.afterCombatTimer = 0;
+                }
+
+                // Gọi khi in_combat chuyển true -> false: fade-out combat_ost rồi pause (giữ currentTime + bài
+                // hiện tại để có thể resume), bắt đầu đếm afterCombatTimer.
+                _exitCombat() {
+                    if (this.combatAudio) {
+                        this._startFade(this.combatAudio, 0, MUSIC_CONFIG.fadeOutDuration, () => {
+                            this.combatAudio.pause(); // Không set currentTime = 0 ở đây — giữ nguyên vị trí để có thể resume
+                        });
+                    }
+                    this._resetAfterCombatCounter();
+                }
+
+                // Gọi khi player vào state dead (bất kể nguyên nhân: combat/drown/fall).
+                // Hủy nhạc ngay lập tức: nếu combat_ost đang phát thì dừng hẳn (không fade), và
+                // afterCombatTimer reset lại từ đầu như vừa mới bắt đầu game.
+                onPlayerDeath() {
+                    this._fade = { audio: null, elapsed: 0, duration: 0, fromVol: 0, toVol: 0, onComplete: null };
+                    this._hardStop(this.combatAudio);
+                    this._hardStop(this.bgAudio);
+                    this.inCombat = false;
+                    this._resetAfterCombatCounter();
+                }
+
+                // Gọi mỗi frame từ animate loop. `inCombatNow` do game.js tính toán và truyền vào.
+                update(dt, inCombatNow) {
+                    this._updateFade(dt);
+
+                    console.log(player.position);
+
+                    if (inCombatNow && !this.inCombat) {
+                        this.inCombat = true;
+                        this._enterCombat();
+                    } else if (!inCombatNow && this.inCombat) {
+                        this.inCombat = false;
+                        this._exitCombat();
+                    }
+
+                    if (this.isCountingAfterCombat) {
+                        this.afterCombatTimer += dt;
+
+                        // Mốc 10s: nếu vẫn chưa combat lại, coi combat_ost đã "nguội" -> random bài mới cho lần sau.
+                        if (!this.combatResetDone && this.afterCombatTimer >= MUSIC_CONFIG.combatResetDelay) {
+                            this.combatResetDone = true;
+                            this._loadRandomCombat(); // Sẵn sàng bài mới; sẽ phát khi _enterCombat() gọi tới
+                        }
+
+                        // Mốc 15s: nếu vẫn chưa combat lại, bắt đầu phát bg_ost (random bài + fade-in).
+                        if (!this.bgStarted && this.afterCombatTimer >= MUSIC_CONFIG.bgStartDelay) {
+                            this.bgStarted = true;
+                            this._loadRandomBg();
+                            if (this.bgAudio) {
+                                this.bgAudio.play().catch(() => {});
+                                this._startFade(this.bgAudio, MUSIC_CONFIG.normalVolume, MUSIC_CONFIG.fadeInDuration);
+                            }
+                        }
+                    }
+                }
+            }
+            const music = window.music = new MusicManager();
+
+            // class AABB, Enemy, Slime, và toàn bộ game logic (terrain, VFX, combat,
+            // physics, camera, animate loop) đã chuyển sang game.js.
+
+
+            // Khởi tạo UI (định nghĩa trong ui.js): menu buttons, touch controls
+            if (window.initMenuButtons) window.initMenuButtons();
+            if (window.initDesktopButtons) window.initDesktopButtons();
+            if (window.initTouchControls) window.initTouchControls();
+            if (window.initTouchGlobalListeners) window.initTouchGlobalListeners();
+            if (window.initQuestSystem) window.initQuestSystem();
+            if (window.initDialogueSystem) window.initDialogueSystem();
+            if (window.initDeathScreen) window.initDeathScreen();
+
+            // Vẽ danh sách Devlog Case Archive (định nghĩa trong comic.js) — render động
+            // từ COMIC_CASES, thêm case mới không cần sửa HTML.
+            if (window.renderComicBookcase) window.renderComicBookcase();
+
+            // initThree, animate định nghĩa trong game.js
+            window.initThree();
+            // initPartySwitchTemp() (ui.js) — PHẢI gọi SAU initThree() vì cần partyState đã dựng xong
+            // (initParty() nằm trong initThree()). Bước 1 tạm thời, Bước 3 sẽ thay bằng Character HUD.
+            if (window.initPartySwitchTemp) window.initPartySwitchTemp();
+            window.animate();
+        };
+    </script>
+<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+<script>
+    eruda.init();
+</script>
+</body>
+</html>
+>
