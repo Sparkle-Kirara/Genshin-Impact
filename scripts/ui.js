@@ -480,10 +480,30 @@ function initMenuButtons() {
         }, { passive: false });
     }
 
+    // Nút Quit (góc dưới thanh utility strip của Paimon Menu, icon power-off) — trước v0.9 chỉ hiện
+    // thông báo "tính năng đang khoá" (placeholder). Từ v0.9: mở popup xác nhận Quit riêng
+    // (#quit-confirm-overlay) — xem window.showQuitConfirm() bên dưới.
     if (closeMenuBtn) {
         closeMenuBtn.addEventListener('click', () => {
-            showGridFeatureNotification('Quit / Return to Title features are currently locked.');
-            sfx.playBlockedSound();
+            if (window.showQuitConfirm) window.showQuitConfirm();
+        });
+    }
+
+    // Quit Confirmation Popup — 2 nút Hủy/Xác nhận (đặt cạnh nơi mở popup để dễ theo dõi luồng, dù
+    // định nghĩa hàm show/hide/confirm nằm ở cuối file — xem window.showQuitConfirm()).
+    // Hủy: CHỈ ẩn popup xác nhận, KHÔNG đóng luôn Paimon Menu phía sau — popup này mở TỪ TRONG Paimon
+    // Menu đang mở sẵn (isGamePaused đã true từ trước), Hủy nghĩa là "quay lại Paimon Menu", không phải
+    // "thoát khỏi Paimon Menu".
+    const quitConfirmCancelBtn = document.getElementById('quit-confirm-cancel-btn');
+    if (quitConfirmCancelBtn) {
+        quitConfirmCancelBtn.addEventListener('click', () => {
+            if (window.hideQuitConfirm) window.hideQuitConfirm();
+        });
+    }
+    const quitConfirmConfirmBtn = document.getElementById('quit-confirm-confirm-btn');
+    if (quitConfirmConfirmBtn) {
+        quitConfirmConfirmBtn.addEventListener('click', () => {
+            if (window.confirmQuitToTitle) window.confirmQuitToTitle();
         });
     }
 
@@ -1176,6 +1196,48 @@ window.cancelPlayerNamePrompt = function () {
     if (window.setCharacterName) window.setCharacterName('');
     if (window.requestSave) window.requestSave();
     window.closePlayerNamePrompt();
+};
+
+// ============================================================
+// QUIT CONFIRMATION POPUP (Pre-Alpha v0.9 – Prelude)
+// ============================================================
+// Mở từ nút #close-menu-btn (góc dưới thanh utility strip TRONG Paimon Menu — nghĩa là Paimon Menu
+// LUÔN đang mở sẵn, isGamePaused đã true, lúc popup này được gọi). togglePauseMenu(true) chỉ gọi
+// PHÒNG HỜ nếu vì lý do nào đó hàm bị gọi khi chưa pause (không phải luồng chính) — tránh gọi lại
+// không cần thiết khi đã pause, vì togglePauseMenu(true) có transition riêng (trượt panel...), gọi
+// thừa sẽ gây giật hình dù không đổi giá trị isGamePaused.
+window.showQuitConfirm = function () {
+    const overlay = document.getElementById('quit-confirm-overlay');
+    if (!overlay) return;
+
+    if (!window.isGamePaused) window.togglePauseMenu(true);
+    overlay.classList.remove('hidden');
+    overlay.classList.add('flex');
+};
+
+// Chỉ ẩn popup — KHÔNG đụng đến togglePauseMenu(). Paimon Menu (phía sau popup) vẫn giữ nguyên trạng
+// thái đang mở, người chơi "Hủy" nghĩa là quay lại Paimon Menu, không phải thoát khỏi nó.
+window.hideQuitConfirm = function () {
+    const overlay = document.getElementById('quit-confirm-overlay');
+    if (overlay) {
+        overlay.classList.add('hidden');
+        overlay.classList.remove('flex');
+    }
+};
+
+
+// Xác nhận Quit -> quay lại Opening UI (mục yêu cầu v0.9 bổ sung). LƯU tiến trình hiện tại NGAY
+// (saveGameNow() — ghi thẳng xuống localStorage, không debounce, khác requestSave() vốn trễ 300ms —
+// cần chắc chắn đã ghi xong TRƯỚC KHI reload() ở dòng kế tiếp, nếu không có thể mất vài giây tiến
+// trình cuối cùng), sau đó reload() lại toàn bộ trang — CÁCH DUY NHẤT đảm bảo dọn sạch 100% state 3D/
+// scene/animate loop/input listeners đang chạy dở (tương tự cơ chế resetSaveData() — 06-camps-save-
+// system.js — nhưng KHÔNG xoá localStorage, chỉ đơn thuần tải lại trang). Sau khi tải lại, Opening Flow
+// tự chạy từ đầu (window.onload -> runOpeningFlow()) và TỰ ĐỘNG bỏ qua Character Name Popup vì
+// loadGameData() giờ khác null (mục 7 spec, xem scripts/opening.js) — không cần code gì thêm để "quay
+// lại Opening UI", đây CHÍNH LÀ hành vi mặc định khi tải lại trang có save data.
+window.confirmQuitToTitle = function () {
+    if (window.saveGameNow) window.saveGameNow();
+    window.location.reload();
 };
 
 // Phím tắt mở Character Screen từ icon trên HUD (mục 1, cách 1 trong character.md) — cùng pattern với
