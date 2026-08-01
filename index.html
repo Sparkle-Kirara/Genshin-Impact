@@ -3,7 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Genshin Impact Pre-Alpha v0.8.5 - Party</title>
+    <title>Genshin Impact Pre-Alpha v0.9 - Prelude</title>
+    <!-- FLAG: OPENING / TITLE SCREEN ĐANG HIỂN THỊ (Pre-Alpha v0.9) -->
+    <!-- Đặt SỚM NHẤT CÓ THỂ (đầu <head>, trước MỌI script khác) — độc lập với thứ tự load của 8 file
+         game logic (01-08, có ràng buộc thứ tự nghiêm ngặt riêng, xem comment gần các thẻ <script
+         src="scripts/game/...">). Trước đây cờ này được set trong 07-input-handlers.js (load SAU
+         06-camps-save-system.js — file có setInterval autosave chạy top-level ngay khi tải), tạo ra 1
+         khoảng hở lý thuyết dù cực nhỏ. Đặt tại đây loại bỏ hoàn toàn phụ thuộc vào thứ tự script — cờ
+         luôn = true trước bất kỳ file game nào kịp chạy. Chỉ có scripts/opening.js (enterGameplay())
+         được phép đổi cờ này thành false, khi Opening kết thúc.
+         BUGFIX liên quan: setInterval autosave định kỳ (06-camps-save-system.js) trước đây chạy vô
+         điều kiện — nếu Opening Flow (logo → background...) mất hơn 10 giây, autosave kịp ghi 1 bản
+         save "mặc định" xuống localStorage TRƯỚC KHI người chơi nhập tên, khiến Opening tưởng nhầm "đã
+         có save" và bỏ qua Character Name Popup dù người chơi vừa xoá save xong. -->
+    <script>window.isOpeningActive = true;</script>
+    <!-- Google Fonts (Cinzel/Inter) — dùng cho Opening/Title Screen (Pre-Alpha v0.9), typography
+         phong cách Genshin. Không ảnh hưởng font mặc định của gameplay UI (vẫn dùng font hệ thống
+         qua Tailwind như trước). -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <!-- Tailwind CSS cho giao diện hiện đại -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Thư viện Three.js chuẩn -->
@@ -14,6 +33,172 @@
     <link rel="icon" type="png" href="assets/icons/Genshin_Impact.png">
 </head>
 <body>
+    <!-- ============================================================ -->
+    <!-- OPENING / TITLE SCREEN (Pre-Alpha v0.9 – Prelude)             -->
+    <!-- ============================================================ -->
+    <!-- Chuyển NGUYÊN VẸN từ title_screen.html (prototype độc lập) — không thiết kế lại,
+         chỉ tích hợp. Đặt TRƯỚC #canvas-container, z-[999] (class Tailwind trên chính thẻ
+         #opening-root) để che phủ toàn bộ gameplay bên dưới trong lúc Opening đang chạy.
+         Logic điều khiển nằm trong scripts/opening.js — xem startGameplay() (cuối file này)
+         để biết điểm nối giữa Opening và gameplay chính. -->
+    <div id="opening-root" class="fixed inset-0 z-[999]">
+
+        <!-- Top Status Bar (Latency & Audio Toggle) -->
+        <div class="top-status-bar">
+            <div class="ping-badge">
+                <i class="fa-solid fa-wifi"></i>
+                <span>24ms</span>
+            </div>
+            <div>Ver. 4.8_LIVE</div>
+            <div id="audio-toggle-btn" class="utility-btn" style="width: 32px; height: 32px; font-size: 12px; border-radius: 50%;" title="Toggle Sound">
+                <i class="fa-solid fa-volume-high" id="audio-icon"></i>
+            </div>
+        </div>
+
+        <!-- Stage Layer 1: Logo Video / Dynamic Canvas -->
+        <div id="stage-logo" class="stage-layer active">
+            <video id="video-logo" class="media-background" playsinline muted></video>
+            <canvas id="canvas-logo" class="media-background"></canvas>
+        </div>
+
+        <!-- Stage Layer 2: Main Background Video / Canvas -->
+        <div id="stage-background" class="stage-layer">
+            <video id="video-background" class="media-background" playsinline loop muted></video>
+            <canvas id="canvas-background" class="media-background"></canvas>
+        </div>
+
+        <!-- Stage Layer 3: Celestial Door Approach Video / Canvas -->
+        <div id="stage-door-intro" class="stage-layer">
+            <video id="video-door-intro" class="media-background" playsinline muted></video>
+            <canvas id="canvas-door-intro" class="media-background"></canvas>
+        </div>
+
+        <!-- Stage Layer 4: Door Opening Video / Canvas -->
+        <div id="stage-open-door" class="stage-layer">
+            <video id="video-open-door" class="media-background" playsinline muted></video>
+            <canvas id="canvas-open-door" class="media-background"></canvas>
+        </div>
+
+        <!-- Stage Layer 5: Loading Scene Video / Canvas -->
+        <div id="stage-loading-scene" class="stage-layer">
+            <video id="video-loading-scene" class="media-background" playsinline muted></video>
+            <canvas id="canvas-loading-scene" class="media-background"></canvas>
+        </div>
+
+        <!-- Character Name Popup -->
+        <div id="popup-character-name" class="popup-backdrop">
+            <div class="genshin-modal">
+                <div class="modal-title-wrapper">
+                    <div class="modal-title">Enter Character Name</div>
+                    <div class="title-divider">
+                        <div class="line"></div>
+                        <div class="diamond"></div>
+                        <div class="line"></div>
+                    </div>
+                </div>
+                <div class="input-container">
+                    <input type="text" id="input-char-name" class="genshin-input" placeholder="Traveler" maxlength="16" autocomplete="off" spellcheck="false" />
+                    <div class="char-counter"><span id="char-count">0</span> / 16</div>
+                </div>
+                <div class="modal-buttons">
+                    <button id="btn-cancel-name" class="genshin-btn genshin-btn-secondary">Cancel</button>
+                    <button id="btn-confirm-name" class="genshin-btn genshin-btn-primary" disabled>Confirm</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Start Overlay UI -->
+        <div id="start-overlay">
+            <div class="overlay-center" id="btn-start-game">
+                <div class="start-title-box">
+                    <div class="start-title">START</div>
+                </div>
+                <div class="press-enter-prompt">──────── PRESS TO ENTER ────────</div>
+                
+                <div class="server-box" id="btn-server-select">
+                    <i class="fa-solid fa-circle-check server-check"></i>
+                    <span>Asia</span>
+                    <i class="fa-solid fa-angle-right" style="font-size: 12px; margin-left: 6px; opacity: 0.6;"></i>
+                </div>
+
+                <div class="user-account-box">
+                    <i class="fa-regular fa-user"></i>
+                    <span id="display-user-name">User: H****o2</span>
+                </div>
+            </div>
+
+            <!-- Bottom Right Utilities -->
+            <div class="bottom-right-utilities">
+                <button id="btn-news" class="utility-btn" title="News / Calendar">
+                    <i id="icon-news" class="fa-regular fa-newspaper"></i>
+                </button>
+                <button id="btn-logout" class="utility-btn" title="Logout">
+                    <i id="icon-logout" class="fa-solid fa-right-from-bracket"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Fake Loading Overlay Screen -->
+        <div id="loading-overlay">
+            <div class="element-icons-container">
+                <div class="element-icon" style="--icon-color: #74e2b0;" title="Anemo"><i class="fa-solid fa-wind"></i></div>
+                <div class="element-icon" style="--icon-color: #fab639;" title="Geo"><i class="fa-solid fa-mountain"></i></div>
+                <div class="element-icon" style="--icon-color: #af73e6;" title="Electro"><i class="fa-solid fa-bolt"></i></div>
+                <div class="element-icon" style="--icon-color: #a5e233;" title="Dendro"><i class="fa-solid fa-leaf"></i></div>
+                <div class="element-icon" style="--icon-color: #4cc2f8;" title="Hydro"><i class="fa-solid fa-droplet"></i></div>
+                <div class="element-icon" style="--icon-color: #ef5a3f;" title="Pyro"><i class="fa-solid fa-fire"></i></div>
+                <div class="element-icon" style="--icon-color: #8ce3e8;" title="Cryo"><i class="fa-regular fa-snowflake"></i></div>
+            </div>
+            <div style="width: 280px; height: 3px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; position: relative;">
+                <div id="loading-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #d3bc8e, #f3e6cd); transition: width 0.3s ease;"></div>
+            </div>
+            <div class="loading-tip" id="loading-tip-text">Tip: Elemental Reactions like Melt and Vaporize multiply damage output!</div>
+        </div>
+
+        <!-- Final Stage: Entering Game Message -->
+        <div id="entering-game-card" class="entering-game-card">
+            <div class="game-title-splash">GENSHIN IMPACT</div>
+            <div class="welcome-msg">Entering Game...</div>
+            <div style="font-size: 14px; color: var(--genshin-text-muted); margin-bottom: 30px;" id="welcome-traveler-label">Welcome, Traveler!</div>
+            <button id="btn-restart-prototype" class="genshin-btn genshin-btn-primary">
+                <i class="fa-solid fa-rotate-left"></i> Restart Prototype
+            </button>
+        </div>
+
+        <!-- News Modal -->
+        <div id="news-modal" class="generic-modal-backdrop">
+            <div class="modal-card">
+                <div class="modal-card-header">
+                    <span>Announcements & Calendar</span>
+                    <button class="close-modal-btn js-close-modal" data-modal-id="news-modal"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div style="font-size: 14px; line-height: 1.6; color: var(--genshin-text-light);">
+                    <p style="margin-bottom: 12px; color: var(--genshin-gold);">✦ Version 4.8 Event Calendar</p>
+                    <p style="margin-bottom: 12px;">Participate in the seasonal adventure quest to unlock exclusive rewards, talent materials, and Primogems!</p>
+                    <p style="color: var(--genshin-text-muted); font-size: 12px;">Server Maintenance Complete | All Rewards Sent</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logout Modal -->
+        <div id="logout-modal" class="generic-modal-backdrop">
+            <div class="modal-card" style="max-width: 400px; text-align: center;">
+                <div class="modal-card-header" style="justify-content: center; border: none; padding-bottom: 0;">
+                    <span>Log Out</span>
+                </div>
+                <p style="margin: 16px 0 24px; color: var(--genshin-text-muted); font-size: 14px;">Are you sure you want to log out of the current account?</p>
+                <div class="modal-buttons">
+                    <button class="genshin-btn genshin-btn-secondary js-close-modal" data-modal-id="logout-modal">Cancel</button>
+                    <button class="genshin-btn genshin-btn-primary js-close-modal" data-modal-id="logout-modal">Confirm</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audio element created dynamically from ASSET_CONFIG -->
+        <audio id="bgm-audio" loop preload="auto"></audio>
+
+    </div>
+
     <!-- CONTAINER CHỨA CANVAS GAME 3D -->
     <div id="canvas-container" class="w-full h-full absolute inset-0 z-0"></div>
 
@@ -779,6 +964,26 @@
         </div>
     </div>
 
+    <!-- QUIT CONFIRMATION POPUP (Pre-Alpha v0.9) -->
+    <!-- Mở bởi nút #close-menu-btn (góc dưới thanh utility strip trong Paimon Menu). Style Tailwind
+         inline giữ NHẤT QUÁN với #player-name-prompt-overlay ở trên (cùng tông màu #12101e/#ebdcb9,
+         cùng bố cục 2 nút Hủy/Xác nhận) — không tái dùng .generic-modal-backdrop/.modal-card (đó là
+         style riêng của Opening UI, tông vàng Genshin, không đồng bộ hình ảnh với Paimon Menu). Logic
+         mở/đóng/xác nhận nằm trong ui.js (window.showQuitConfirm/hideQuitConfirm/confirmQuitToTitle),
+         KHÔNG dùng onclick inline (nhất quán cách event binding của phần lớn ui.js). -->
+    <div id="quit-confirm-overlay" class="fixed inset-0 z-[85] hidden items-center justify-center bg-black/70 pointer-events-auto">
+        <div class="bg-[#12101e]/95 border border-[#ebdcb9]/40 rounded-2xl px-6 py-6 shadow-2xl w-full max-w-xs mx-4 flex flex-col gap-4">
+            <div class="text-center">
+                <h3 class="text-lg font-bold text-[#f7e8cf] font-serif">Thoát về Màn Hình Chính?</h3>
+                <p class="text-xs text-[#9c94c0] mt-1">Tiến trình hiện tại sẽ được lưu lại trước khi thoát.</p>
+            </div>
+            <div class="flex gap-3">
+                <button id="quit-confirm-cancel-btn" class="flex-1 py-2 rounded-lg border border-[#2d284f]/60 text-[#9c94c0] text-sm font-semibold hover:bg-[#1f1a35] transition-all">Hủy</button>
+                <button id="quit-confirm-confirm-btn" class="flex-1 py-2 rounded-lg bg-red-500/80 hover:bg-red-400/90 text-[#12101e] text-sm font-bold transition-all">Xác nhận</button>
+            </div>
+        </div>
+    </div>
+
 
     <!-- QUEST TRACKER (góc trái, trên giữa màn hình) -->
     <div id="quest-tracker" class="fixed left-4 top-1/3 z-30 hidden flex-col gap-2 pointer-events-none">
@@ -1159,7 +1364,13 @@
         // --- HỆ THỐNG QUẢN LÝ TRẠNG THÁI WINDOW TRUNG TÂM (v0.8.0) ---
         // activeWindow, openStoryReader(), closeStoryReader() đã chuyển sang ui.js
 
-        window.onload = function() {
+        // --- TÍCH HỢP OPENING/TITLE SCREEN (Pre-Alpha v0.9) ---
+        // Khối này TRƯỚC v0.9 là window.onload (tự chạy ngay khi trang tải xong) — giờ đổi thành hàm
+        // thường window.startGameplay(), KHÔNG tự chạy. Được gọi ĐÚNG 1 LẦN bởi scripts/opening.js
+        // (enterGameplay(), cuối Opening Flow) sau khi người chơi hoàn thành toàn bộ Opening. Nội dung
+        // bên trong KHÔNG đổi gì so với trước v0.9 (mục "Không thay đổi gameplay" của spec) — chỉ đổi
+        // cách hàm này được gọi.
+        window.startGameplay = function() {
             window.container = document.getElementById('canvas-container');
             const container = window.container;
             const mobileControls = document.getElementById('mobile-controls');
@@ -1718,10 +1929,21 @@
             window.animate();
         };
     </script>
+    <script src="scripts/opening.js"></script>
+    <script>
+        // --- ĐIỂM KHỞI ĐỘNG DUY NHẤT CỦA TRANG (Pre-Alpha v0.9) ---
+        // window.onload giờ chỉ gọi Opening Flow (scripts/opening.js) — KHÔNG gọi thẳng
+        // window.startGameplay() nữa. Gameplay chỉ khởi động sau khi người chơi hoàn thành Opening
+        // (xem enterGameplay() trong scripts/opening.js), hoặc ngay sau bước Door Intro nếu đã có save
+        // data (mục 7 spec — bỏ qua Character Name Popup, nhưng vẫn chạy hết các bước còn lại của
+        // Opening Flow).
+        window.onload = function () {
+            window.runOpeningFlow();
+        };
+    </script>
 <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
 <script>
     eruda.init();
 </script>
 </body>
 </html>
->
