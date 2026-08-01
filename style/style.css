@@ -306,3 +306,597 @@ body, html {
         .star-active-bounce {
             animation: star-click 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
         }
+
+        /* ============================================================ */
+        /* OPENING / TITLE SCREEN (Pre-Alpha v0.9 – Prelude)             */
+        /* ============================================================ */
+        /* Toàn bộ khối CSS dưới đây được chuyển NGUYÊN VẸN từ title_screen.html
+           (prototype độc lập) sang đây theo yêu cầu tích hợp v0.9 — không thiết kế
+           lại, chỉ di chuyển. Class/ID không trùng với bất kỳ style nào ở trên (đã rà
+           soát trước khi merge), nên an toàn nối thẳng vào cuối file. Logic tương ứng
+           nằm trong scripts/opening.js, HTML tương ứng nằm trong index.html (khối
+           #opening-root). */
+        :root {
+            --genshin-gold: #d3bc8e;
+            --genshin-gold-bright: #f3e6cd;
+            --genshin-gold-dark: #8c764e;
+            --genshin-text-light: #ece5d8;
+            --genshin-text-muted: #a69e8f;
+            --genshin-bg-dark: rgba(18, 22, 31, 0.85);
+            --genshin-panel-bg: rgba(22, 28, 40, 0.75);
+            --genshin-border: rgba(211, 188, 142, 0.35);
+            --genshin-border-glow: rgba(211, 188, 142, 0.6);
+            --genshin-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+            --genshin-font-serif: 'Cinzel', 'Trajan Pro', Georgia, serif;
+            --genshin-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #05070a;
+            font-family: var(--genshin-font-sans);
+            color: var(--genshin-text-light);
+        }
+
+        /* #opening-root: vị trí/kích thước (fixed inset-0 z-[999]) đã gán trực tiếp qua class
+           Tailwind trên phần tử trong index.html — chỉ còn overflow:hidden ở đây (Tailwind không có
+           utility mặc định tương đương gọn hơn cho trường hợp này). */
+        #opening-root {
+            overflow: hidden;
+        }
+
+        .stage-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 1.2s cubic-bezier(0.25, 1, 0.5, 1);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .stage-layer.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        /* Video / Canvas background fit */
+        .media-background {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: translate(-50%, -50%);
+            z-index: 1;
+        }
+
+        .popup-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(5, 8, 15, 0.65);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 50;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            transform: scale(1.05);
+        }
+
+        .popup-backdrop.show {
+            opacity: 1;
+            pointer-events: auto;
+            transform: scale(1);
+        }
+
+        .genshin-modal {
+            width: 90%;
+            max-width: 480px;
+            background: var(--genshin-panel-bg);
+            border: 1px solid var(--genshin-border);
+            border-radius: 8px;
+            box-shadow: var(--genshin-shadow), 0 0 20px rgba(211, 188, 142, 0.15);
+            padding: 32px 28px 24px;
+            position: relative;
+            text-align: center;
+            overflow: hidden;
+        }
+
+        /* Gold filigree corners */
+        .genshin-modal::before, .genshin-modal::after {
+            content: '';
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border: 2px solid var(--genshin-gold);
+            pointer-events: none;
+        }
+        .genshin-modal::before { top: 6px; left: 6px; border-right: none; border-bottom: none; }
+        .genshin-modal::after { bottom: 6px; right: 6px; border-left: none; border-top: none; }
+
+        .modal-title-wrapper {
+            position: relative;
+            margin-bottom: 24px;
+        }
+
+        .modal-title {
+            font-family: var(--genshin-font-serif);
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--genshin-gold-bright);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            text-shadow: 0 0 10px rgba(211, 188, 142, 0.4);
+        }
+
+        .title-divider {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 10px;
+            gap: 12px;
+        }
+
+        .title-divider .line {
+            height: 1px;
+            flex-grow: 1;
+            background: linear-gradient(90deg, transparent, var(--genshin-gold), transparent);
+        }
+
+        .title-divider .diamond {
+            width: 6px;
+            height: 6px;
+            background: var(--genshin-gold);
+            transform: rotate(45deg);
+        }
+
+        .input-container {
+            position: relative;
+            margin-bottom: 28px;
+        }
+
+        .genshin-input {
+            width: 100%;
+            background: rgba(10, 14, 23, 0.8);
+            border: 1px solid var(--genshin-border);
+            border-radius: 4px;
+            padding: 12px 16px;
+            font-size: 16px;
+            color: #ffffff;
+            font-family: var(--genshin-font-sans);
+            outline: none;
+            transition: border-color 0.3s, box-shadow 0.3s;
+            text-align: center;
+            letter-spacing: 1px;
+        }
+
+        .genshin-input:focus {
+            border-color: var(--genshin-gold);
+            box-shadow: 0 0 12px rgba(211, 188, 142, 0.3);
+        }
+
+        .char-counter {
+            position: absolute;
+            right: 12px;
+            bottom: -20px;
+            font-size: 11px;
+            color: var(--genshin-text-muted);
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+        }
+
+        .genshin-btn {
+            min-width: 120px;
+            padding: 10px 24px;
+            border-radius: 20px;
+            font-family: var(--genshin-font-sans);
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            position: relative;
+            outline: none;
+            border: 1px solid transparent;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .genshin-btn-secondary {
+            background: rgba(35, 43, 60, 0.8);
+            color: var(--genshin-text-muted);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .genshin-btn-secondary:hover {
+            background: rgba(50, 60, 82, 0.9);
+            color: #ffffff;
+            border-color: rgba(255, 255, 255, 0.3);
+            transform: translateY(-1px);
+        }
+
+        .genshin-btn-primary {
+            background: linear-gradient(135deg, #e3c07a 0%, #c49c51 100%);
+            color: #1a150c;
+            box-shadow: 0 4px 15px rgba(212, 172, 89, 0.3);
+        }
+
+        .genshin-btn-primary:hover:not(:disabled) {
+            background: linear-gradient(135deg, #ebd093 0%, #d8ae5e 100%);
+            box-shadow: 0 6px 20px rgba(212, 172, 89, 0.5);
+            transform: translateY(-2px);
+        }
+
+        .genshin-btn-primary:disabled {
+            background: #3b3730;
+            color: #6a6458;
+            cursor: not-allowed;
+            box-shadow: none;
+            border-color: transparent;
+        }
+
+        .genshin-btn:active:not(:disabled) {
+            transform: translateY(1px);
+        }
+
+        #start-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 40;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: 60px 20px 80px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 1s ease;
+            background: radial-gradient(circle at center, transparent 30%, rgba(5, 8, 15, 0.4) 100%);
+        }
+
+        #start-overlay.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .overlay-center {
+            margin: auto;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            cursor: pointer;
+            padding: 40px;
+            width: 100%;
+        }
+
+        .start-title-box {
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        .start-title {
+            font-family: var(--genshin-font-serif);
+            font-size: 64px;
+            font-weight: 700;
+            letter-spacing: 12px;
+            color: #ffffff;
+            text-shadow: 0 0 25px rgba(255, 255, 255, 0.8), 0 0 50px rgba(211, 188, 142, 0.5);
+            transition: transform 0.3s ease, text-shadow 0.3s ease;
+        }
+
+        .overlay-center:hover .start-title {
+            transform: scale(1.03);
+            text-shadow: 0 0 35px rgba(255, 255, 255, 0.95), 0 0 60px rgba(211, 188, 142, 0.8);
+        }
+
+        .press-enter-prompt {
+            font-family: var(--genshin-font-serif);
+            font-size: 16px;
+            letter-spacing: 4px;
+            color: var(--genshin-gold-bright);
+            text-shadow: 0 0 10px rgba(211, 188, 142, 0.6);
+            margin-bottom: 40px;
+            animation: pulsePrompt 2.5s infinite ease-in-out;
+        }
+
+        @keyframes pulsePrompt {
+            0%, 100% { opacity: 0.4; transform: scale(0.98); }
+            50% { opacity: 1; transform: scale(1); }
+        }
+
+        /* Server Box */
+        .server-box {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(18, 24, 36, 0.75);
+            border: 1px solid var(--genshin-border);
+            padding: 8px 24px;
+            border-radius: 20px;
+            font-size: 15px;
+            color: var(--genshin-text-light);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(6px);
+            margin-bottom: 12px;
+            transition: border-color 0.3s, background 0.3s;
+        }
+
+        .server-box:hover {
+            border-color: var(--genshin-gold);
+            background: rgba(26, 35, 52, 0.85);
+        }
+
+        .server-check {
+            color: #4ade80;
+            font-size: 14px;
+        }
+
+        /* User Account Label */
+        .user-account-box {
+            font-size: 14px;
+            color: var(--genshin-text-muted);
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .bottom-right-utilities {
+            position: absolute;
+            bottom: 40px;
+            right: 40px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            z-index: 45;
+        }
+
+        .utility-btn {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(22, 28, 40, 0.75);
+            border: 1px solid var(--genshin-border);
+            color: var(--genshin-gold);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 18px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(8px);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .utility-btn:hover {
+            transform: scale(1.12);
+            border-color: var(--genshin-gold-bright);
+            background: rgba(35, 45, 65, 0.9);
+            color: #ffffff;
+            box-shadow: 0 0 15px rgba(211, 188, 142, 0.4);
+        }
+
+        .utility-btn:active {
+            transform: scale(0.95);
+        }
+
+        .top-status-bar {
+            position: absolute;
+            top: 24px;
+            right: 32px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            font-size: 12px;
+            color: var(--genshin-text-muted);
+            z-index: 45;
+        }
+
+        .ping-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #4ade80;
+        }
+
+        #loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: #000000;
+            z-index: 60;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 1s ease;
+        }
+
+        #loading-overlay.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .element-icons-container {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 40px;
+        }
+
+        .element-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            color: rgba(255, 255, 255, 0.2);
+            transition: all 0.5s ease;
+        }
+
+        .element-icon.active {
+            color: #ffffff;
+            border-color: var(--genshin-gold);
+            box-shadow: 0 0 15px var(--icon-color, rgba(211, 188, 142, 0.6));
+            transform: scale(1.15);
+        }
+
+        .loading-tip {
+            max-width: 500px;
+            text-align: center;
+            font-size: 13px;
+            color: var(--genshin-text-muted);
+            line-height: 1.6;
+            margin-top: 20px;
+            padding: 0 20px;
+            min-height: 40px;
+        }
+
+        .entering-game-card {
+            position: absolute;
+            inset: 0;
+            background: rgba(5, 7, 12, 0.95);
+            z-index: 70;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 1.2s ease;
+            text-align: center;
+        }
+
+        .entering-game-card.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .game-title-splash {
+            font-family: var(--genshin-font-serif);
+            font-size: 38px;
+            font-weight: 700;
+            color: var(--genshin-gold-bright);
+            letter-spacing: 6px;
+            margin-bottom: 16px;
+            text-shadow: 0 0 20px rgba(211, 188, 142, 0.5);
+        }
+
+        .welcome-msg {
+            font-size: 18px;
+            color: var(--genshin-text-light);
+            margin-bottom: 30px;
+            letter-spacing: 2px;
+        }
+
+        .generic-modal-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(6px);
+            z-index: 80;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.4s ease;
+        }
+
+        .generic-modal-backdrop.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-card {
+            width: 90%;
+            max-width: 560px;
+            background: var(--genshin-panel-bg);
+            border: 1px solid var(--genshin-border);
+            border-radius: 8px;
+            padding: 28px;
+            box-shadow: var(--genshin-shadow);
+            position: relative;
+        }
+
+        .modal-card-header {
+            font-family: var(--genshin-font-serif);
+            font-size: 20px;
+            color: var(--genshin-gold-bright);
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(211, 188, 142, 0.2);
+            padding-bottom: 12px;
+        }
+
+        .close-modal-btn {
+            background: none;
+            border: none;
+            color: var(--genshin-text-muted);
+            font-size: 18px;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .close-modal-btn:hover {
+            color: #ffffff;
+        }
+
+        @media (max-width: 768px) {
+            .start-title {
+                font-size: 42px;
+                letter-spacing: 6px;
+            }
+            .press-enter-prompt {
+                font-size: 13px;
+                letter-spacing: 2px;
+            }
+            .bottom-right-utilities {
+                bottom: 24px;
+                right: 24px;
+            }
+            .genshin-modal {
+                padding: 24px 20px 20px;
+            }
+            .element-icons-container {
+                gap: 12px;
+            }
+            .element-icon {
+                width: 36px;
+                height: 36px;
+                font-size: 16px;
+            }
+        }
