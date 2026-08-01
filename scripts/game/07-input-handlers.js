@@ -1,3 +1,12 @@
+            // --- FLAG: OPENING / TITLE SCREEN ĐANG HIỂN THỊ (Pre-Alpha v0.9) ---
+            // window.isOpeningActive được khởi tạo = true ở ĐẦU <head> trong index.html (script inline
+            // đầu tiên của toàn trang, trước MỌI file game — kể cả file này). KHÔNG khởi tạo lại ở đây
+            // — đặt tại index.html đảm bảo cờ luôn sẵn sàng SỚM HƠN bất kỳ file game logic 01-08 nào
+            // kịp chạy, độc lập hoàn toàn với thứ tự load giữa 8 file đó (xem bugfix liên quan: trước
+            // đây khởi tạo ở đây, sau 06-camps-save-system.js — file có setInterval autosave chạy
+            // top-level — tạo ra 1 khoảng hở lý thuyết). scripts/opening.js (enterGameplay()) là nơi
+            // DUY NHẤT được phép đổi cờ này thành false, khi Opening kết thúc.
+
             const keys = window.keys = { w: false, a: false, s: false, d: false, space: false, dash: false, ctrl: false, dashJustPressed: false };
             let altPressed = false;
             Object.defineProperty(window, 'altPressed', {
@@ -8,10 +17,31 @@
 
             window.addEventListener('contextmenu', (e) => { e.preventDefault(); });
 
+            // --- GUARD: OPENING / TITLE SCREEN (Pre-Alpha v0.9) ---
+            // window.isOpeningActive = true mặc định (đặt đầu <head> trong index.html, tắt = false trong
+            // enterGameplay() khi Opening kết thúc). File này (07-input-handlers.js) chạy TOP-LEVEL
+            // ngay khi <script> load — TRƯỚC KHI initThree() từng gọi — nên các listener bên dưới đã
+            // ĐĂNG KÝ SẴN và sẽ nhận sự kiện ngay cả khi Opening còn đang hiển thị (che gameplay bằng
+            // z-index, không chặn input tới window). Nếu không chặn, người chơi có thể: (1) vô tình gây
+            // side-effect gameplay (mở Pause Menu, đổi player.walkMode...) trong lúc Opening chạy, hoặc
+            // (2) làm crash 'resize' handler (camera/renderer vẫn undefined cho tới khi initThree()
+            // chạy xong). Thêm guard sớm nhất có thể trong mỗi handler, TRƯỚC mọi truy cập
+            // player/camera/renderer.
+
             window.addEventListener('keydown', (e) => {
+                if (window.isOpeningActive) return;
                 if (e.key === 'Escape') {
                     if (window.isDialogueOpen) {
                         if (window.closeDialogue) window.closeDialogue();
+                        return;
+                    }
+                    // Quit Confirmation Popup (Pre-Alpha v0.9) — ưu tiên đóng TRƯỚC nhánh isGamePaused
+                    // bên dưới. Nếu không, Escape sẽ đóng cả Paimon Menu (togglePauseMenu(false)) trong
+                    // khi popup Quit vẫn còn class 'flex' (chưa qua hideQuitConfirm()) — lần mở Paimon
+                    // Menu kế tiếp, popup Quit sẽ hiện đè lên dù người chơi không bấm nút Quit.
+                    const quitConfirmOverlay = document.getElementById('quit-confirm-overlay');
+                    if (quitConfirmOverlay && !quitConfirmOverlay.classList.contains('hidden')) {
+                        if (window.hideQuitConfirm) window.hideQuitConfirm();
                         return;
                     }
                     if (isGamePaused) {
@@ -98,6 +128,7 @@
             });
 
             window.addEventListener('keyup', (e) => {
+                if (window.isOpeningActive) return;
                 if (isGamePaused || window.isDialogueOpen || player.isDrowning || player.isDead) return;
 
                 if (e.key === 'Alt') {
@@ -123,11 +154,13 @@
             });
 
             window.addEventListener('blur', () => { 
+                if (window.isOpeningActive) return;
                 for (let k in keys) keys[k] = false; 
                 altPressed = false; 
             });
 
             window.addEventListener('mousedown', (e) => {
+                if (window.isOpeningActive) return;
                 if (isGamePaused || window.isDialogueOpen || player.isDrowning || player.isDead) return;
                 if (isMobile || altPressed || e.target.closest('button') || e.target.closest('.joystick-zone') || e.target.closest('.combat-btn') || e.target.closest('#desktop-skill-btn') || e.target.closest('#game-menu')) return;
                 
@@ -142,6 +175,7 @@
             });
 
             window.addEventListener('mouseup', (e) => { 
+                if (window.isOpeningActive) return;
                 if (isGamePaused || window.isDialogueOpen || player.isDrowning || player.isDead) return;
                 if (!isMobile && !altPressed && e.button === 2) {
                     keys.dash = false; 
@@ -150,6 +184,7 @@
             });
 
             window.addEventListener('mousemove', (e) => {
+                if (window.isOpeningActive) return;
                 if (isMobile || isGamePaused || window.isDialogueOpen) return;
                 if (document.pointerLockElement === container && !altPressed) {
                     cameraState.targetTheta -= e.movementX * cameraState.sensitivity * cameraSensitivityMultiplier;
@@ -161,12 +196,18 @@
             document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== container && !altPressed && !isGamePaused) altPressed = false; });
 
             window.addEventListener('wheel', (e) => {
+                if (window.isOpeningActive) return;
                 if (isGamePaused || window.isDialogueOpen) return;
                 cameraState.targetDistance += e.deltaY * cameraState.zoomSensitivity * 0.1;
                 cameraState.targetDistance = Math.max(cameraState.minDistance, Math.min(cameraState.maxDistance, cameraState.targetDistance));
             }, { passive: true });
 
             window.addEventListener('resize', () => {
+                // Guard riêng (không dùng window.isOpeningActive) — kiểm tra thẳng camera/renderer đã
+                // tồn tại chưa, vì đây là lỗi CRASH cụ thể (không chỉ "input rò rỉ" như các handler
+                // khác): camera/renderer là undefined cho tới khi initThree() chạy xong, dù Opening đã
+                // kết thúc hay chưa (fallback an toàn 2 lớp).
+                if (!camera || !renderer) return;
                 camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
                 renderer.setSize(window.innerWidth, window.innerHeight);
             });

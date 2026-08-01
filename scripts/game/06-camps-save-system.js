@@ -388,13 +388,32 @@
             // tục). 10 giây là đủ để không mất nhiều tiến trình di chuyển nếu tab bị đóng đột ngột,
             // trong khi không ghi localStorage quá thường xuyên khi người chơi chỉ đang đi lại bình
             // thường (không có sự kiện quan trọng nào khác kích hoạt requestSave()).
+            //
+            // BUGFIX (v0.9): setInterval này chạy TOP-LEVEL ngay khi file load — TRƯỚC KHI Opening Flow
+            // (scripts/opening.js) kịp kiểm tra loadGameData() để quyết định hiện Character Name Popup.
+            // Nếu Opening mất hơn 10 giây để tới bước kiểm tra (logo.mp4 dài, hoặc người chơi xem lâu ở
+            // màn Background), interval này ĐÃ KỊP chạy ít nhất 1 lần và ghi 1 bản save "mặc định" (tên
+            // nhân vật hard-code sẵn trong CHARACTER_DATA, VD "Traveler" hoặc tên còn sót trong bộ nhớ
+            // từ code) vào localStorage — khiến loadGameData() trả về KHÁC null dù người chơi vừa xoá
+            // save xong, làm Opening tưởng nhầm "đã có save" và bỏ qua popup nhập tên (dù thực ra chưa
+            // ai nhập gì). Guard bằng window.isOpeningActive — cờ này mặc định true (đặt tại đầu
+            // 07-input-handlers.js, tắt = false trong enterGameplay() khi Opening kết thúc) — không ghi
+            // gì xuống localStorage cho tới khi gameplay THẬT SỰ bắt đầu.
             const POSITION_AUTOSAVE_INTERVAL_MS = 10000;
-            setInterval(() => { saveGameNow(); }, POSITION_AUTOSAVE_INTERVAL_MS);
+            setInterval(() => {
+                if (window.isOpeningActive) return;
+                saveGameNow();
+            }, POSITION_AUTOSAVE_INTERVAL_MS);
 
             // Lưu ngay lập tức (KHÔNG debounce) khi người chơi rời trang/đóng tab — cơ hội cuối cùng để
             // ghi trạng thái mới nhất, vì setTimeout của requestSave() có thể không kịp chạy nếu trang
-            // đóng ngay sau đó.
-            window.addEventListener('beforeunload', () => { saveGameNow(); });
+            // đóng ngay sau đó. Guard tương tự — nếu người chơi đóng tab ngay TRONG LÚC Opening đang
+            // chạy (chưa từng nhập tên/vào gameplay), không được phép ghi save "rỗng" đè lên bất kỳ save
+            // cũ nào (hoặc tạo save mới không mong muốn khi lẽ ra phải là "chưa có save").
+            window.addEventListener('beforeunload', () => {
+                if (window.isOpeningActive) return;
+                saveGameNow();
+            });
 
             // --- RESET SAVE DATA (mục 4 spec) ---
             // Chỉ xoá localStorage rồi reload trang — KHÔNG tự dựng lại state trong bộ nhớ (phức tạp,

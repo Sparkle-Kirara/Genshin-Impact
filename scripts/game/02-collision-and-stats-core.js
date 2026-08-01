@@ -286,7 +286,7 @@
                 // Hệ số nhân theo LOẠI đòn đánh (multiplier trong calculateFinalDamage) — KHÔNG còn
                 // là "damage points" độc lập như trước v0.7. Final Damage thực tế của 1 đòn melee =
                 // calculateFinalDamage(player.stats.atk, enemy.stats.def, player.attack.melee).
-                attack: { melee: 1, plunge: 1.75, burst: 2.5, hydroProjectile: 1.5 },
+                attack: { melee: 1, plunge: 3, burst: 4, hydroProjectile: 1.5 },
                 energy: 0, maxEnergy: 50, skillHitCount: 0,
 
                 // --- EXP (v0.6 Wilderness, mục 8) — chỉ cộng dồn, CHƯA có hệ thống Level/tăng cấp.
@@ -358,7 +358,7 @@
                 jumpRequested: false,
 
                 speed: 7.2,           
-                sprintSpeed: 13.0,    
+                sprintSpeed: 14.0,    
                 walkSpeed: 3.8  ,       
                 acceleration: 45.0,   
                 deceleration: 18.0,   
@@ -822,7 +822,7 @@
                     trailChance: 0.6 // Xác suất/frame sinh hạt nước theo đường bay
                 },
                 pressureShot: {
-                    damage: 1.5, // Hệ số nhân với player.attack.hydroProjectile
+                    damage: 2, // Hệ số nhân với player.attack.hydroProjectile
                     maxRange: 24,
                     beamRadius: 0.4,
                     fadeDuration: 0.3,
@@ -877,7 +877,7 @@
                     largeEnemySlowFactor: 1,
                     largeEnemyStaggerDuration: 0.3
                 },
-                damage: 0.4, // Hệ số nhân với player.attack.burst
+                damage: 0.5, // Hệ số nhân với player.attack.burst
                 damageTickInterval: 0.35
             };
             window.BURST_CONFIG = BURST_CONFIG;
