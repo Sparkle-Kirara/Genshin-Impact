@@ -366,7 +366,12 @@ function initTouchGlobalListeners() {
         if (e.target.closest('.scrollable-panel')) return;
 
         if (isGamePaused || player.isDrowning) {
-            if (e.target.closest('#menu-left-panel') || e.target.closest('#rpg-sub-window') || e.target.closest('#paimon-star-btn')) {
+            // BUGFIX (v0.9): #quit-confirm-overlay (popup xác nhận Quit) và #player-name-prompt-overlay
+            // (popup nhập tên) PHẢI nằm trong whitelist này — cả 2 popup dùng chung pattern "fixed
+            // inset-0 ... pointer-events-auto", có thể mở trong lúc isGamePaused = true. Trên desktop
+            // (dùng click chuột) không gặp vấn đề này vì click không đi qua touchstart — chỉ mobile mới
+            // bị chặn (đúng như báo cáo: 2 nút Hủy/Xác nhận không phản hồi khi chạm trên điện thoại).
+            if (e.target.closest('#menu-left-panel') || e.target.closest('#rpg-sub-window') || e.target.closest('#paimon-star-btn') || e.target.closest('#quit-confirm-overlay') || e.target.closest('#player-name-prompt-overlay') || e.target.closest('#reset-save-confirm-overlay')) {
                 return;
             }
             e.preventDefault();
@@ -397,7 +402,8 @@ function initTouchGlobalListeners() {
         if (e.target.closest('.scrollable-panel')) return;
 
         if (isGamePaused || player.isDrowning) {
-            if (e.target.closest('#menu-left-panel')) {
+            // BUGFIX (v0.9): xem chú thích tương ứng ở touchstart phía trên — cùng lý do.
+            if (e.target.closest('#menu-left-panel') || e.target.closest('#quit-confirm-overlay') || e.target.closest('#player-name-prompt-overlay')) {
                 return;
             }
             e.preventDefault();
