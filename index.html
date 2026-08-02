@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Genshin Impact Pre-Alpha v0.9 - Prelude</title>
+    <title>Genshin Impact Pre-Alpha v0.3 - Genisis</title>
     <!-- FLAG: OPENING / TITLE SCREEN ĐANG HIỂN THỊ (Pre-Alpha v0.9) -->
     <!-- Đặt SỚM NHẤT CÓ THỂ (đầu <head>, trước MỌI script khác) — độc lập với thứ tự load của 8 file
          game logic (01-08, có ràng buộc thứ tự nghiêm ngặt riêng, xem comment gần các thẻ <script
@@ -30,7 +30,7 @@
     <!-- Font Awesome cho icon -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="style/style.css">
-    <link rel="icon" type="png" href="assets/icons/Genshin_Impact.png">
+    <link rel="icon" type="png" href="assets/icon/Genshin_Impact.png">
 </head>
 <body>
     <!-- ============================================================ -->
@@ -152,7 +152,7 @@
             <div style="width: 280px; height: 3px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; position: relative;">
                 <div id="loading-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #d3bc8e, #f3e6cd); transition: width 0.3s ease;"></div>
             </div>
-            <div class="loading-tip" id="loading-tip-text">Tip: Elemental Reactions like Melt and Vaporize multiply damage output!</div>
+            <div class="loading-tip" id="loading-tip-text">Mẹo: Thêm game vào Màn hình chính, chơi Toàn màn hình và xoay ngang máy để có trải nghiệm nhập vai tốt nhất!</div>
         </div>
 
         <!-- Final Stage: Entering Game Message -->
@@ -1860,6 +1860,21 @@
                 // Hủy nhạc ngay lập tức: nếu combat_ost đang phát thì dừng hẳn (không fade), và
                 // afterCombatTimer reset lại từ đầu như vừa mới bắt đầu game.
                 onPlayerDeath() {
+                    this._fade = { audio: null, elapsed: 0, duration: 0, fromVol: 0, toVol: 0, onComplete: null };
+                    this._hardStop(this.combatAudio);
+                    this._hardStop(this.bgAudio);
+                    this.inCombat = false;
+                    this._resetAfterCombatCounter();
+                }
+
+                // BUGFIX/TÍCH HỢP (v0.9 – Return to Title Flow, lỗi 3): dừng NGAY LẬP TỨC cả bg_ost lẫn
+                // combat_ost (không fade — tương tự onPlayerDeath(), nhưng tên riêng để rõ ngữ cảnh gọi:
+                // đây KHÔNG phải người chơi chết, mà là Exit về Title). Trước đây không có hàm nào dừng
+                // nhạc gameplay khi Return to Title, khiến bg_ost/combat_ost tiếp tục phát chồng lên
+                // background.mp3 của Opening. Gọi từ runReturnToTitleFlow() (scripts/opening.js) NGAY
+                // KHI Exit được xác nhận. update() sẽ không tự bật lại nhạc sau lệnh gọi này vì nó nằm
+                // trong nhánh animate() bị gate bởi window.isGamePaused (= true suốt lúc ở Title).
+                stopAll() {
                     this._fade = { audio: null, elapsed: 0, duration: 0, fromVol: 0, toVol: 0, onComplete: null };
                     this._hardStop(this.combatAudio);
                     this._hardStop(this.bgAudio);
