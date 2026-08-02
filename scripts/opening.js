@@ -532,7 +532,22 @@
 
         const state = {
             charName: '',
-            isOverlayVisible: false
+            isOverlayVisible: false,
+            // TÍCH HỢP (v0.9 – Return to Title Flow, luồng flow mới): true SAU KHI video/canvas Door
+            // Intro đã phát đủ (~10s hoặc video kết thúc) — cho phép người chơi bấm màn hình để chuyển
+            // tiếp sang Open Door Stage. Door Intro KHÔNG có overlay UI riêng (khác Start Overlay ở
+            // Background) — chỉ là 1 lớp "bấm để tiếp tục" vô hình, nên cần cờ riêng thay vì dùng chung
+            // isOverlayVisible.
+            isDoorIntroReady: false,
+            // TÍCH HỢP (v0.9 – Return to Title Flow): true SAU LẦN ĐẦU vào gameplay thành công (Cold
+            // Start hoàn tất) — dùng để phân biệt "vào gameplay lần đầu" (enterGameplay() — gọi
+            // window.startGameplay(), khởi tạo TOÀN BỘ scene 3D/animate loop/listeners) với "Start
+            // Again sau khi Return to Title" (resumeGameplay() — CHỈ hiện lại canvas/HUD đã có sẵn
+            // trong bộ nhớ, KHÔNG gọi lại startGameplay(), tránh tạo scene 3D thứ 2 chồng lên). Sống
+            // trong bộ nhớ JS thuần (không qua localStorage) — đúng bản chất: false lại khi trang thực
+            // sự reload/mở mới (Cold Start), giữ nguyên true nếu chỉ Return to Title rồi Start Again
+            // (không reload).
+            hasEnteredGameplayBefore: false
         };
 
         const DOM = {
@@ -610,12 +625,20 @@
             );
         }
 
-        // Flow Step 2: Background Video & Music + Character Name Popup
+        // Flow Step 2: Background Video & Music + Character Name Popup + Start Overlay
         // BUGFIX/TÍCH HỢP (v0.9 mục 7): chỉ hiện Character Name Popup nếu CHƯA có save data — nếu
         // người chơi đã có hành trình cũ (window.loadGameData() khác null — hạ tầng Save System sẵn có
-        // trong 06-camps-save-system.js), bỏ qua bước nhập tên, đi thẳng sang Door Intro Stage. Giữ
-        // NGUYÊN mọi bước khác của Opening Flow (Logo → Background → Door → Start → Loading) — đúng
-        // yêu cầu "chạy đầy đủ từng bước, chỉ bỏ qua popup tên".
+        // trong 06-camps-save-system.js), bỏ qua bước nhập tên.
+        //
+        // LUỒNG FLOW MỚI (thay thế thiết kế gốc của prototype, nơi Start Overlay nằm ở CUỐI Door
+        // Intro): Start Overlay giờ hiện NGAY TẠI Background Stage — sau khi video/nhạc nền bắt đầu,
+        // và sau khi Character Name Popup (nếu cần) được xác nhận. Door Intro (runDoorIntroStage(),
+        // bên dưới) không còn overlay UI riêng — chỉ là cảnh chuyển tiếp, người chơi bấm màn hình LẦN
+        // NỮA ở đó để sang Open Door. Áp dụng ĐỒNG NHẤT cho cả Cold Start và Return to Title — cả 2
+        // luồng giờ dùng chung ĐÚNG 1 đường đi tại Background (khác biệt duy nhất giữa 2 luồng là
+        // Character Name Popup chỉ hiện khi CHƯA có save, không liên quan Cold Start hay Return to
+        // Title — Return to Title luôn có save nên luôn bỏ qua popup này một cách tự nhiên, không cần
+        // tham số nextStep nữa).
         function runBackgroundStage() {
             setStage(DOM.stageBg);
 
@@ -631,7 +654,7 @@
             const hasExistingSave = !!(window.loadGameData && window.loadGameData());
             if (hasExistingSave) {
                 setTimeout(() => {
-                    runDoorIntroStage();
+                    showStartOverlay();
                 }, 300);
             } else {
                 setTimeout(() => {
@@ -657,6 +680,10 @@
         // thay vì chỉ lưu vào biến state.charName nội bộ — đây là bước THỰC SỰ ghi tên nhân vật vào
         // CHARACTER_DATA của game. requestSave() ghi lại ngay để tên không mất nếu người chơi thoát
         // giữa chừng Opening (trước khi vào gameplay).
+        //
+        // LUỒNG FLOW MỚI: sau khi xác nhận tên, hiện Start Overlay NGAY TẠI Background Stage (KHÔNG
+        // còn nhảy sang Door Intro như thiết kế cũ) — người chơi bấm màn hình ở đây trước, Door Intro
+        // chỉ xuất hiện SAU khi bấm Start.
         DOM.btnConfirmName.addEventListener('click', () => {
             audio.playClick();
             state.charName = DOM.inputCharName.value.trim();
@@ -669,7 +696,7 @@
             DOM.popupCharName.classList.remove('show');
 
             setTimeout(() => {
-                runDoorIntroStage();
+                showStartOverlay();
             }, 600);
         });
 
@@ -681,34 +708,49 @@
             DOM.inputCharName.dispatchEvent(new Event('input'));
         });
 
-        // Flow Step 3: Door Intro Stage (~10s resource loading camera zoom)
-        function runDoorIntroStage() {
-            setStage(DOM.stageDoorIntro);
-
-            if (ASSET_CONFIG.door.intro) {
-                DOM.videoDoorIntro.src = ASSET_CONFIG.door.intro;
-                DOM.videoDoorIntro.play().then(() => {
-                    const checkTime = setInterval(() => {
-                        if (DOM.videoDoorIntro.currentTime >= 10 || DOM.videoDoorIntro.ended) {
-                            clearInterval(checkTime);
-                            showStartOverlay();
-                        }
-                    }, 200);
-                }).catch(() => {
-                    sceneRenderer.renderDoorIntro(() => showStartOverlay());
-                });
-            } else {
-                sceneRenderer.renderDoorIntro(() => showStartOverlay());
-            }
-        }
-
         function showStartOverlay() {
             if (state.isOverlayVisible) return;
             state.isOverlayVisible = true;
             DOM.startOverlay.classList.add('show');
         }
 
-        // Flow Step 4: Click Anywhere / Press Enter -> Open Door Stage
+        // --- IMMERSIVE MODE (Hidden Update — Immersive Mode) ---
+        // Yêu cầu Fullscreen + khoá Landscape khi người chơi bấm START — PHẢI gọi trực tiếp trong 1
+        // user gesture (click/keydown Enter) vì Fullscreen API và Screen Orientation API đều bị trình
+        // duyệt chặn nếu gọi ngoài ngữ cảnh tương tác trực tiếp của người dùng (không thể gọi trễ qua
+        // setTimeout/Promise callback). Best-effort tuyệt đối: nếu trình duyệt không hỗ trợ, người
+        // chơi từ chối, hoặc thiết bị chặn (VD iOS Safari không hỗ trợ Screen Orientation Lock) — bắt
+        // lỗi và bỏ qua trong im lặng, KHÔNG chặn hay làm gián đoạn Door Intro Stage phía sau. Đây chỉ
+        // là tiện ích UX phụ, không phải yêu cầu bắt buộc để chơi được game (spec: "Không bắt buộc
+        // Fullscreen. Không chặn người chơi nếu không thể chuyển Fullscreen").
+        function requestImmersiveMode() {
+            try {
+                const el = document.documentElement;
+                const requestFs = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+                if (requestFs) {
+                    const fsPromise = requestFs.call(el);
+                    // Một số trình duyệt trả về Promise, số khác không (Safari cũ) — chỉ .catch() nếu
+                    // thực sự là Promise để tránh lỗi "fsPromise.catch is not a function".
+                    if (fsPromise && typeof fsPromise.catch === 'function') {
+                        fsPromise.then(() => {
+                            // Khoá Landscape CHỈ SAU KHI Fullscreen thành công — Screen Orientation Lock
+                            // trên hầu hết trình duyệt di động yêu cầu đang ở chế độ Fullscreen, gọi
+                            // ngoài Fullscreen sẽ luôn bị từ chối (không phải lỗi, chỉ là môi trường
+                            // không đủ điều kiện).
+                            if (screen.orientation && screen.orientation.lock) {
+                                screen.orientation.lock('landscape').catch(() => {});
+                            }
+                        }).catch(() => {});
+                    }
+                }
+            } catch (e) {
+                // Best-effort — không làm gì thêm, Door Intro Stage vẫn tiếp tục bình thường.
+            }
+        }
+
+        // Flow Step 3: Click Anywhere / Press Enter (ở Background, tại Start Overlay) -> Door Intro
+        // Stage. LUỒNG FLOW MỚI: trước đây nút này dẫn thẳng sang Open Door — giờ dẫn sang Door Intro
+        // (bước trung gian mới được dời từ vị trí trước Start Overlay sang sau nó).
         DOM.btnStartGame.addEventListener('click', (e) => {
             e.stopPropagation();
             if (!state.isOverlayVisible) return;
@@ -716,15 +758,64 @@
             audio.playClick();
             state.isOverlayVisible = false;
             DOM.startOverlay.classList.remove('show');
+            // Immersive Mode: phải gọi NGAY trong handler click này (user gesture gốc), không được dời
+            // vào trong setTimeout() bên dưới — xem comment tại requestImmersiveMode().
+            requestImmersiveMode();
 
             setTimeout(() => {
-                runOpenDoorStage();
+                runDoorIntroStage();
             }, 600);
         });
 
         window.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && state.isOverlayVisible) {
                 DOM.btnStartGame.click();
+            }
+        });
+
+        // Flow Step 4: Door Intro Stage (~10s resource loading camera zoom) — KHÔNG có overlay UI
+        // riêng (không hiện Start/tên nhân vật ở đây nữa). Sau khi video đủ ~10s hoặc kết thúc (hoặc
+        // canvas fallback hoàn tất animation), cho phép người chơi BẤM MÀN HÌNH để chuyển tiếp sang
+        // Open Door Stage — KHÔNG tự động chuyển như thiết kế cũ (giữ đúng cảm giác "chờ rồi bấm" nhất
+        // quán với Start Overlay ở Background).
+        function runDoorIntroStage() {
+            setStage(DOM.stageDoorIntro);
+            state.isDoorIntroReady = false;
+
+            if (ASSET_CONFIG.door.intro) {
+                DOM.videoDoorIntro.src = ASSET_CONFIG.door.intro;
+                DOM.videoDoorIntro.play().then(() => {
+                    const checkTime = setInterval(() => {
+                        if (DOM.videoDoorIntro.currentTime >= 10 || DOM.videoDoorIntro.ended) {
+                            clearInterval(checkTime);
+                            state.isDoorIntroReady = true;
+                        }
+                    }, 200);
+                }).catch(() => {
+                    sceneRenderer.renderDoorIntro(() => { state.isDoorIntroReady = true; });
+                });
+            } else {
+                sceneRenderer.renderDoorIntro(() => { state.isDoorIntroReady = true; });
+            }
+        }
+
+        // Bấm màn hình bất kỳ đâu trong Door Intro Stage (chỉ nhận khi stage này đang active VÀ đã sẵn
+        // sàng — state.isDoorIntroReady) -> Open Door Stage. Gắn trên chính DOM.stageDoorIntro (toàn bộ
+        // vùng stage) thay vì 1 nút cụ thể, vì spec yêu cầu "bấm màn hình" (không có UI nút rõ ràng ở
+        // bước này).
+        DOM.stageDoorIntro.addEventListener('click', () => {
+            if (!state.isDoorIntroReady) return;
+            state.isDoorIntroReady = false;
+
+            audio.playClick();
+            setTimeout(() => {
+                runOpenDoorStage();
+            }, 300);
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && DOM.stageDoorIntro.classList.contains('active') && state.isDoorIntroReady) {
+                DOM.stageDoorIntro.click();
             }
         });
 
@@ -761,8 +852,18 @@
             "Tip: Combining Pyro and Hydro triggers Vaporize, dealing increased damage!",
             "Tip: Use Anemo abilities to Swirl elements across multiple enemies.",
             "Tip: Elemental Resonance grants special party-wide stat buffs.",
-            "Tip: Keep an eye out for Anemoculi and Geoculi while exploring Teyvat!"
+            "Tip: Keep an eye out for Anemoculi and Geoculi while exploring Teyvat!",
+            // Paimon Menu (Hidden Update — mục 3 spec): khuyến nghị trải nghiệm dành cho người chơi
+            // trên điện thoại — Add to Home Screen, Fullscreen, Landscape. Vẫn nằm trong pool random
+            // để có thể xuất hiện lại ở các lần Loading Stage sau (Start Again) — xem
+            // IMMERSIVE_MODE_TIP + runLoadingOverlayStage() bên dưới cho lần XUẤT HIỆN ĐẦU TIÊN.
+            "Mẹo: Thêm game vào Màn hình chính, chơi Toàn màn hình và xoay ngang máy để có trải nghiệm nhập vai tốt nhất!"
         ];
+        // Tip mặc định khớp với nội dung tĩnh đặt sẵn trong index.html (#loading-tip-text) — dùng
+        // đúng chuỗi này (không random) ở lần Loading Stage ĐẦU TIÊN của Cold Start, để mẹo quan
+        // trọng nhất (Immersive Mode) chắc chắn được thấy ít nhất 1 lần thay vì phụ thuộc may rủi vào
+        // random trong tipsList.
+        const IMMERSIVE_MODE_TIP = tipsList[tipsList.length - 1];
 
         // Flow Step 7: Final Screen - "Entering Game..." -> KẾT NỐI GAMEPLAY (v0.9 mục 6)
         // Sau khi thanh loading chạy xong, hiện card "Entering Game..." đúng 1 nhịp ngắn (giữ nguyên
@@ -775,8 +876,18 @@
         // ảnh hưởng các tham chiếu DOM.btnRestartPrototype khác nếu có mở rộng sau này).
         function runLoadingOverlayStage() {
             DOM.loadingOverlay.classList.add('show');
+            // Reset tường minh về 0% ngay khi bắt đầu — nếu không, lần chạy lại (Start Again sau Return
+            // to Title) sẽ thoáng hiện width 100% cũ (còn sót từ lần trước) trong ~80ms đầu, trước khi
+            // setInterval bên dưới kịp ghi giá trị 2% đầu tiên.
+            DOM.loadingProgressBar.style.width = '0%';
 
-            DOM.loadingTipText.textContent = tipsList[Math.floor(Math.random() * tipsList.length)];
+            // Lần Loading Stage ĐẦU TIÊN của Cold Start (chưa từng vào gameplay trong phiên trang này)
+            // → luôn hiện mẹo Immersive Mode, khớp với nội dung tĩnh đã đặt sẵn trong index.html (tránh
+            // "nháy" đổi chữ nếu random tình cờ trùng). Các lần SAU (Start Again sau Return to Title) →
+            // random như cũ trong tipsList, kể cả có thể lại ra đúng mẹo này.
+            DOM.loadingTipText.textContent = state.hasEnteredGameplayBefore
+                ? tipsList[Math.floor(Math.random() * tipsList.length)]
+                : IMMERSIVE_MODE_TIP;
             const elementIcons = document.querySelectorAll('.element-icon');
 
             let currentIcon = 0;
@@ -802,7 +913,17 @@
                         DOM.enteringGameCard.classList.add('show');
 
                         setTimeout(() => {
-                            enterGameplay();
+                            // TÍCH HỢP (v0.9 – Return to Title Flow, mục 4 "Start Again"): lần ĐẦU TIÊN
+                            // vào gameplay (Cold Start) → enterGameplay() (khởi tạo toàn bộ, gọi
+                            // startGameplay()). Các lần SAU (đã từng Exit về Title rồi bấm Start lại) →
+                            // resumeGameplay() — CHỈ hiện lại canvas/HUD đã tồn tại sẵn trong bộ nhớ,
+                            // KHÔNG gọi lại startGameplay() (tránh tạo scene 3D thứ 2 chồng lên scene cũ
+                            // — xem resumeGameplay() bên dưới).
+                            if (state.hasEnteredGameplayBefore) {
+                                resumeGameplay();
+                            } else {
+                                enterGameplay();
+                            }
                         }, 1200);
                     }, 500);
                 }
@@ -826,8 +947,107 @@
             // 07-input-handlers.js) TRƯỚC KHI gọi startGameplay() — để initThree()/animate() và mọi
             // input WASD/chuột/phím tắt hoạt động bình thường ngay khi gameplay thật bắt đầu.
             window.isOpeningActive = false;
+            state.hasEnteredGameplayBefore = true;
             if (window.startGameplay) window.startGameplay();
         }
+
+        // TÍCH HỢP (v0.9 – Return to Title Flow, mục 4 "Start Again"): dùng CHO CÁC LẦN Start SAU lần
+        // đầu (đã từng Exit về Title ít nhất 1 lần trong phiên trang hiện tại, KHÔNG reload). Khác
+        // enterGameplay() ở chỗ KHÔNG gọi window.startGameplay() — scene 3D/animate loop/toàn bộ
+        // listener của gameplay VẪN CÒN SỐNG NGUYÊN trong bộ nhớ từ lần Cold Start đầu tiên (chỉ bị ẩn
+        // + đóng băng update logic lúc Exit — xem runReturnToTitleFlow() bên dưới), nên chỉ cần hiện lại
+        // canvas/HUD và mở khoá lại input/update logic (window.isGamePaused = false).
+        function resumeGameplay() {
+            sceneRenderer.stopAll();
+            const openingRoot = document.getElementById('opening-root');
+            if (openingRoot) {
+                openingRoot.style.transition = 'opacity 0.6s ease';
+                openingRoot.style.opacity = '0';
+                setTimeout(() => {
+                    openingRoot.style.display = 'none';
+                }, 600);
+            }
+
+            const canvasContainer = document.getElementById('canvas-container');
+            if (canvasContainer) canvasContainer.classList.remove('hidden');
+            if (window.isMobile) {
+                const mobileControls = document.getElementById('mobile-controls');
+                if (mobileControls) mobileControls.classList.remove('hidden');
+            } else {
+                const desktopHud = document.getElementById('desktop-hud');
+                if (desktopHud) desktopHud.classList.remove('hidden');
+            }
+
+            window.isOpeningActive = false;
+            // Mở khoá update logic gameplay (physics/combat/camera input...) — xem animate() trong
+            // 08-physics-combat-camera-loop.js, toàn bộ nhánh update bị gate bởi window.isGamePaused.
+            // togglePauseMenu(false) KHÔNG dùng ở đây vì nó còn làm nhiều việc khác (đóng Paimon Menu,
+            // exitPointerLock...) không cần thiết lúc resume — Paimon Menu chắc chắn đã đóng từ lúc
+            // Exit (xem runReturnToTitleFlow()), không có gì để "đóng" thêm.
+            window.isGamePaused = false;
+        }
+
+        // TÍCH HỢP (v0.9 – Return to Title Flow, mục 2-3): gọi từ window.returnToTitle() (ui.js,
+        // confirmQuitToTitle()) khi người chơi xác nhận Exit trong Paimon Menu. KHÔNG reload trang —
+        // chỉ ẩn canvas/HUD gameplay (giữ nguyên scene 3D/state trong bộ nhớ, xem quyết định thiết kế ở
+        // resumeGameplay() phía trên), đóng băng update logic (window.isGamePaused = true), rồi hiện lại
+        // #opening-root và chạy TIẾP từ Background Stage — KHÔNG phát lại logo.mp4, Character Name
+        // Popup, hay door_intro.mp4 (đúng spec mục 3 "Return Flow": Gameplay → Exit Confirmation → Auto
+        // Save → Fade Out → background.mp4 + background.mp3 → Start Overlay).
+        function runReturnToTitleFlow() {
+            window.isGamePaused = true; // Đóng băng update logic gameplay NGAY (physics/combat/input)
+            window.isOpeningActive = true; // Chặn lại input gameplay top-level (WASD/chuột/phím tắt)
+
+            // BUGFIX (lỗi 3): dừng NGAY bg_ost/combat_ost (MusicManager, index.html) — nếu không, nhạc
+            // gameplay tiếp tục phát chồng lên background.mp3 của Opening (runBackgroundStage() bên
+            // dưới sẽ gọi audio.startBgm()). Gọi TRƯỚC MỌI THỨ khác trong hàm này để không có khoảng hở
+            // nào nhạc cũ còn vang lên cùng lúc với bước chuyển cảnh.
+            if (window.music) window.music.stopAll();
+
+            // BUGFIX: togglePauseMenu(false) (gọi TRƯỚC hàm này, từ confirmQuitToTitle() trong ui.js —
+            // vì phải đóng Paimon Menu trước khi ẩn canvas) TỰ ĐỘNG requestPointerLock() lại nếu không
+            // phải mobile — khoá chuột vào canvas game (dù canvas sắp bị ẩn ngay sau đây). Nếu không
+            // exitPointerLock() lại ở đây, chuột sẽ "kẹt vô hình" khi người chơi ở màn Title, không click
+            // được Start Overlay hay bất kỳ nút Opening nào trên desktop.
+            if (document.pointerLockElement) {
+                document.exitPointerLock();
+            }
+
+            // BUGFIX: #entering-game-card (thẻ "Entering Game...") chỉ được setStage() quản lý gián
+            // tiếp — thực ra nó là overlay RIÊNG, không thuộc 5 "stage chính" mà setStage() ẩn/hiện. Ở
+            // luồng Cold Start gốc, class 'show' của nó bị bỏ mặc mãi sau khi enterGameplay() ẩn hẳn
+            // #opening-root (không sao vì cha đã display:none). Nhưng Return to Title HIỆN LẠI
+            // #opening-root — nếu không chủ động ẩn ở đây, thẻ "Entering Game..." cũ sẽ hiện đè lên
+            // Background Stage ngay khi vừa Exit.
+            if (DOM.enteringGameCard) DOM.enteringGameCard.classList.remove('show');
+            if (DOM.loadingOverlay) DOM.loadingOverlay.classList.remove('show');
+
+            const canvasContainer = document.getElementById('canvas-container');
+            if (canvasContainer) canvasContainer.classList.add('hidden');
+            const mobileControls = document.getElementById('mobile-controls');
+            if (mobileControls) mobileControls.classList.add('hidden');
+            const desktopHud = document.getElementById('desktop-hud');
+            if (desktopHud) desktopHud.classList.add('hidden');
+
+            const openingRoot = document.getElementById('opening-root');
+            if (openingRoot) {
+                openingRoot.style.display = '';
+                openingRoot.style.opacity = '0';
+                openingRoot.style.transition = 'opacity 0.6s ease';
+                // Ép trình duyệt tính lại style trước khi đổi opacity, nếu không transition sẽ không
+                // chạy (đổi display:none -> '' và opacity trong CÙNG 1 tick JS khiến trình duyệt gộp 2
+                // thay đổi làm 1, không có "trạng thái trước" để transition từ đó).
+                void openingRoot.offsetWidth;
+                openingRoot.style.opacity = '1';
+            }
+
+            // LUỒNG FLOW MỚI: runBackgroundStage() không còn nhận tham số nextStep — Return to Title
+            // giờ đi qua CÙNG MỘT logic với Cold Start tại Background Stage (kiểm tra hasExistingSave,
+            // nhưng Return to Title chắc chắn luôn có save nên tự nhiên rơi vào nhánh hiện Start
+            // Overlay, không cần phân nhánh thủ công như trước).
+            runBackgroundStage();
+        }
+        window.returnToTitle = runReturnToTitleFlow;
 
         // Utility Modal Handlers
         DOM.btnNews.addEventListener('click', (e) => {

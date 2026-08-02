@@ -366,12 +366,16 @@ function initTouchGlobalListeners() {
         if (e.target.closest('.scrollable-panel')) return;
 
         if (isGamePaused || player.isDrowning) {
-            // BUGFIX (v0.9): #quit-confirm-overlay (popup xác nhận Quit) và #player-name-prompt-overlay
-            // (popup nhập tên) PHẢI nằm trong whitelist này — cả 2 popup dùng chung pattern "fixed
-            // inset-0 ... pointer-events-auto", có thể mở trong lúc isGamePaused = true. Trên desktop
-            // (dùng click chuột) không gặp vấn đề này vì click không đi qua touchstart — chỉ mobile mới
-            // bị chặn (đúng như báo cáo: 2 nút Hủy/Xác nhận không phản hồi khi chạm trên điện thoại).
-            if (e.target.closest('#menu-left-panel') || e.target.closest('#rpg-sub-window') || e.target.closest('#paimon-star-btn') || e.target.closest('#quit-confirm-overlay') || e.target.closest('#player-name-prompt-overlay') || e.target.closest('#reset-save-confirm-overlay')) {
+            // BUGFIX (v0.9 – Return to Title Flow): #opening-root PHẢI nằm trong whitelist này — khi
+            // Return to Title chạy (runReturnToTitleFlow(), scripts/opening.js), window.isGamePaused bị
+            // set true để đóng băng gameplay, nhưng #opening-root (Start Overlay, Character Name Popup,
+            // các modal Opening...) hiện lại NGAY SAU ĐÓ và cần nhận touch bình thường. Whitelist theo
+            // toàn bộ #opening-root (không liệt kê từng ID con) vì bất cứ khi nào nó đang hiển thị,
+            // isGamePaused chắc chắn đang true do chính luồng Return to Title gây ra — không có tình
+            // huống nào #opening-root hiện mà lại KHÔNG nên nhận touch. #quit-confirm-overlay/
+            // #player-name-prompt-overlay/#reset-save-confirm-overlay vẫn giữ riêng vì chúng có thể mở
+            // ngay TRONG gameplay (Paimon Menu), không nằm trong #opening-root.
+            if (e.target.closest('#menu-left-panel') || e.target.closest('#rpg-sub-window') || e.target.closest('#paimon-star-btn') || e.target.closest('#quit-confirm-overlay') || e.target.closest('#player-name-prompt-overlay') || e.target.closest('#reset-save-confirm-overlay') || e.target.closest('#opening-root')) {
                 return;
             }
             e.preventDefault();
@@ -403,7 +407,7 @@ function initTouchGlobalListeners() {
 
         if (isGamePaused || player.isDrowning) {
             // BUGFIX (v0.9): xem chú thích tương ứng ở touchstart phía trên — cùng lý do.
-            if (e.target.closest('#menu-left-panel') || e.target.closest('#quit-confirm-overlay') || e.target.closest('#player-name-prompt-overlay')) {
+            if (e.target.closest('#menu-left-panel') || e.target.closest('#quit-confirm-overlay') || e.target.closest('#player-name-prompt-overlay') || e.target.closest('#opening-root')) {
                 return;
             }
             e.preventDefault();
@@ -1232,18 +1236,18 @@ window.hideQuitConfirm = function () {
 };
 
 
-// Xác nhận Quit -> quay lại Opening UI (mục yêu cầu v0.9 bổ sung). LƯU tiến trình hiện tại NGAY
-// (saveGameNow() — ghi thẳng xuống localStorage, không debounce, khác requestSave() vốn trễ 300ms —
-// cần chắc chắn đã ghi xong TRƯỚC KHI reload() ở dòng kế tiếp, nếu không có thể mất vài giây tiến
-// trình cuối cùng), sau đó reload() lại toàn bộ trang — CÁCH DUY NHẤT đảm bảo dọn sạch 100% state 3D/
-// scene/animate loop/input listeners đang chạy dở (tương tự cơ chế resetSaveData() — 06-camps-save-
-// system.js — nhưng KHÔNG xoá localStorage, chỉ đơn thuần tải lại trang). Sau khi tải lại, Opening Flow
-// tự chạy từ đầu (window.onload -> runOpeningFlow()) và TỰ ĐỘNG bỏ qua Character Name Popup vì
-// loadGameData() giờ khác null (mục 7 spec, xem scripts/opening.js) — không cần code gì thêm để "quay
-// lại Opening UI", đây CHÍNH LÀ hành vi mặc định khi tải lại trang có save data.
+// Xác nhận Quit -> quay lại Title Screen (Pre-Alpha v0.9 – Return to Title Flow). LƯU tiến trình hiện
+// tại NGAY (saveGameNow() — ghi thẳng xuống localStorage, không debounce, khác requestSave() vốn trễ
+// 300ms — cần chắc chắn đã ghi xong trước khi rời gameplay). KHÔNG dùng window.location.reload() nữa
+// (spec v0.9 – Return to Title Flow: "Không reload trang") — thay vào đó đóng Paimon Menu + popup Quit
+// Confirm (dọn sạch UI overlay đang mở), rồi gọi window.returnToTitle() (scripts/opening.js) để ẩn
+// canvas/HUD gameplay và chạy tiếp Opening Flow TỪ Background Stage (bỏ qua logo.mp4/Character Name
+// Popup/door_intro.mp4 — các bước đó chỉ dành cho Cold Start, xem runReturnToTitleFlow()).
 window.confirmQuitToTitle = function () {
     if (window.saveGameNow) window.saveGameNow();
-    window.location.reload();
+    if (window.hideQuitConfirm) window.hideQuitConfirm();
+    if (window.isGamePaused) window.togglePauseMenu(false);
+    if (window.returnToTitle) window.returnToTitle();
 };
 
 // Phím tắt mở Character Screen từ icon trên HUD (mục 1, cách 1 trong character.md) — cùng pattern với
