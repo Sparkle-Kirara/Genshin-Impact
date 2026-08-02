@@ -415,6 +415,23 @@
                 saveGameNow();
             });
 
+            // --- SESSION RESUME: AUTOSAVE KHI TAB BỊ ẨN (Hidden Update — Session Resume) ---
+            // Khác 'beforeunload' (trang THỰC SỰ đóng) — 'visibilitychange' bắn khi người chơi chuyển
+            // app khác, khoá màn hình, hoặc đổi tab, nhưng trang KHÔNG đóng và KHÔNG reload. Gameplay
+            // vẫn sống nguyên trong RAM (scene 3D/state JS không bị huỷ) — đây KHÔNG phải Return to
+            // Title Flow (runReturnToTitleFlow(), scripts/opening.js) nên KHÔNG đóng băng
+            // window.isGamePaused hay hiện lại #opening-root, chỉ ghi 1 bản save phòng trường hợp
+            // trình duyệt/hệ điều hành giải phóng RAM và kill tab thật sự trong lúc ẩn — nếu Session
+            // Resume trong RAM không còn khả thi (tab bị kill thật), Cold Start sau đó vẫn khôi phục
+            // được gần đúng tiến trình qua loadGameData(), thay vì mất sạch từ lần autosave định kỳ
+            // 10s trước đó. Guard bằng isOpeningActive giống các điểm ghi khác — không ghi save "rỗng"
+            // nếu người chơi ẩn tab ngay trong lúc Opening đang chạy (chưa vào gameplay thật).
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState !== 'hidden') return;
+                if (window.isOpeningActive) return;
+                saveGameNow();
+            });
+
             // --- RESET SAVE DATA (mục 4 spec) ---
             // Chỉ xoá localStorage rồi reload trang — KHÔNG tự dựng lại state trong bộ nhớ (phức tạp,
             // dễ sót 1 biến nào đó không reset đúng). Reload là cách chắc chắn 100% mọi state (kể cả
