@@ -505,7 +505,7 @@
                     element: 'Hydro',
                     region: 'Mondstadt',
                     bodyColor: 0x475569, // Màu gốc — giữ đúng như player Pre-Alpha trước v0.8.5
-                    baseStats: { maxHp: 100, atk: 20, def: 10 }
+                    baseStats: { maxHp: 100, atk: 16, def: 10 }
                 },
                 {
                     id: 'test_character_anemo',
@@ -517,7 +517,7 @@
                     element: 'Anemo',
                     region: 'Mondstadt',
                     bodyColor: 0x16a34a,
-                    baseStats: { maxHp: 90, atk: 18, def: 8 }
+                    baseStats: { maxHp: 90, atk: 12, def: 8 }
                 },
                 null, // Reserved slot 3 — dành cho Character nhận thêm sau này (Alpha)
                 null  // Reserved slot 4
@@ -818,12 +818,12 @@
                 smallShot: {
                     speed: 15.0,
                     damage: 0.2, // Hệ số nhân với player.attack.hydroProjectile
-                    maxRange: 16,
+                    maxRange: 24,
                     trailChance: 0.6 // Xác suất/frame sinh hạt nước theo đường bay
                 },
                 pressureShot: {
                     damage: 2, // Hệ số nhân với player.attack.hydroProjectile
-                    maxRange: 24,
+                    maxRange: 32,
                     beamRadius: 0.4,
                     fadeDuration: 0.3,
                     recoilDistance: 1.2, // Quãng đường (m) nhân vật bị đẩy lùi sau khi bắn — nhỏ, chỉ
