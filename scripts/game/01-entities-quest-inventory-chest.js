@@ -95,14 +95,14 @@
                     rewards: [{ type: 'primogem', amount: 60 }]
                 },
                 {
-                    id: 'gather_mushroom_10', slot: 'gathering',
+                    id: 'gather_mushroom_8', slot: 'gathering',
                     title: 'Thu thập 10 Mushroom',
                     description: 'Tìm Mushroom mọc dưới tán cây trong rừng',
                     type: 'gather', targetType: 'mushroom', targetCount: 10,
                     rewards: [{ type: 'primogem', amount: 60 }]
                 },
                 {
-                    id: 'gather_apple_10', slot: 'gathering',
+                    id: 'gather_apple_8', slot: 'gathering',
                     title: 'Thu thập 10 Apple',
                     description: 'Hái Táo trực tiếp từ những cây táo trong rừng',
                     type: 'gather', targetType: 'apple', targetCount: 10,
@@ -1019,4 +1019,5 @@
                     gravity: isBurst ? 9 : 0, scaleDown: true
                 });
             }
+
 

@@ -12,7 +12,8 @@
                 ]);
                 const uvs = new Float32Array([
                     0, 0, 1, 0, 1, 1,
-                    0, 0, 1, 1, 0, 1,
+                    0, 0, 1, 1, 0, 1,                [20.0, 10.0, 60.0, 2.0, 2.0, 2.0],
+
                     0, 0, 1, 0, 1, 1,
                     0, 0, 1, 1, 0, 1
                 ]);
@@ -305,22 +306,160 @@
                 const existingSaveData = loadGameData();
                 applySaveData(existingSaveData);
 
-                // Pre-Alpha v0.8 (Character, UI adjustment) — hành trình MỚI (chưa từng có save data)
-                // thì hiện popup yêu cầu nhập tên nhân vật NGAY LÚC BẮT ĐẦU, đúng 1 lần duy nhất (từ
-                // lần chơi kế tiếp trở đi, characterName đã có trong save data — xem applySaveData()
-                // ở trên — nên existingSaveData sẽ khác null và nhánh này không chạy nữa). Gọi SAU
-                // applySaveData() (không phải trước) để chắc chắn đây thực sự là hành trình mới chứ
-                // không phải save data lỗi/thiếu field characterName (save cũ trước v0.8 vẫn có
-                // existingSaveData khác null, không nên hiện lại prompt dù thiếu characterName).
-                if (!existingSaveData && window.showPlayerNamePrompt) {
-                    window.showPlayerNamePrompt();
-                }
+                // GỠ BỎ (v0.9 — dọn dẹp code chết): trước đây có gọi window.showPlayerNamePrompt() ở
+                // đây (Pre-Alpha v0.8, popup nhập tên cũ #player-name-prompt-overlay) cho hành trình
+                // mới. Từ v0.9, Character Name Popup ĐÃ được tích hợp vào Opening/Title Screen
+                // (scripts/opening.js — runBackgroundStage(), dùng chung đúng window.setCharacterName()
+                // + window.requestSave()) và chạy TRƯỚC KHI initThree() từng được gọi (enterGameplay()
+                // gọi window.startGameplay() sau khi người chơi đã xác nhận tên xong ở Opening Screen).
+                // Gọi lại ở đây là thừa (đường gọi cũ đã bị thay thế hoàn toàn) và từng có race
+                // condition với debounce 300ms của requestSave() (initThree() chạy đồng bộ ngay sau khi
+                // Confirm Name, có thể sớm hơn lúc requestSave() thực sự ghi xong localStorage — khiến
+                // loadGameData() ở dòng 306 phía trên vẫn trả về null ngay cả khi tên vừa được xác nhận
+                // xong). Xoá hẳn thay vì sửa timing vì luồng nhập tên chính thức giờ là Opening Screen,
+                // không cần đường dự phòng này nữa.
 
                 playtestMetrics.lastPosition.copy(player.position);
             }
             window.initThree = initThree;
 
-            // --- CẤU HÌNH VÁCH ĐÁ (CLIMB WALLS, Pre-Alpha v0.3 — Frontier, Iteration 2) ---
+            // --- FONT LƯỚI ĐIỂM 5x7 (DOT-MATRIX) + generateTextWall() ---
+            // Thay cho việc gõ tay từng khối [x,y,z,w,h,d] cho mỗi chữ cái (cách cũ dùng để dựng chữ W
+            // — xem lịch sử: 14 khối zigzag thủ công, không đồng bộ font, tốn công nhân bản cho từng
+            // chữ). Chuẩn "dot-matrix 5x7" là bảng bit quen thuộc (kiểu LED sign/Arduino): mỗi ký tự là
+            // lưới 7 hàng x 5 cột, hàng đầu tiên trong mảng là ĐỈNH chữ (duyệt xuống = Y giảm dần khi
+            // build). Bit 1 = có khối đá tại ô đó, bit 0 = để trống (không tạo mesh, tiết kiệm
+            // obstacles). Chỉ cần thêm ký tự mới vào FONT_5x7 là dùng được ngay, không đụng gì logic
+            // generateTextWall() bên dưới.
+            const FONT_5x7 = {
+                'A': ["01110","10001","10001","11111","10001","10001","10001"],
+                'B': ["11110","10001","10001","11110","10001","10001","11110"],
+                'C': ["01111","10000","10000","10000","10000","10000","01111"],
+                'D': ["11110","10001","10001","10001","10001","10001","11110"],
+                'E': ["11111","10000","10000","11110","10000","10000","11111"],
+                'F': ["11111","10000","10000","11110","10000","10000","10000"],
+                'G': ["01111","10000","10000","10011","10001","10001","01111"],
+                'H': ["10001","10001","10001","11111","10001","10001","10001"],
+                'I': ["11111","00100","00100","00100","00100","00100","11111"],
+                'J': ["00111","00010","00010","00010","00010","10010","01100"],
+                'K': ["10001","10010","10100","11000","10100","10010","10001"],
+                'L': ["10000","10000","10000","10000","10000","10000","11111"],
+                'M': ["10001","11011","10101","10101","10001","10001","10001"],
+                'N': ["10001","11001","10101","10101","10011","10001","10001"],
+                'O': ["01110","10001","10001","10001","10001","10001","01110"],
+                'P': ["11110","10001","10001","11110","10000","10000","10000"],
+                'Q': ["01110","10001","10001","10001","10101","10010","01101"],
+                'R': ["11110","10001","10001","11110","10100","10010","10001"],
+                'S': ["01111","10000","10000","01110","00001","00001","11110"],
+                'T': ["11111","00100","00100","00100","00100","00100","00100"],
+                'U': ["10001","10001","10001","10001","10001","10001","01110"],
+                'V': ["10001","10001","10001","10001","10001","01010","00100"],
+                'W': ["10001","10001","10001","10101","10101","10101","01010"],
+                'X': ["10001","10001","01010","00100","01010","10001","10001"],
+                'Y': ["10001","10001","01010","00100","00100","00100","00100"],
+                'Z': ["11111","00001","00010","00100","01000","10000","11111"],
+                ' ': ["00000","00000","00000","00000","00000","00000","00000"],
+                // --- Ký tự đặc biệt (dấu câu, ký hiệu bàn phím) — cùng lưới 5x7, dùng chung
+                // generateTextWall(), không cần hàm riêng. Thêm ký tự mới chỉ cần thêm 1 dòng ở đây.
+                ':': ["00000","01100","01100","00000","01100","01100","00000"],
+                ',': ["00000","00000","00000","00000","00000","01100","01000"],
+                '.': ["00000","00000","00000","00000","00000","01100","01100"],
+                '!': ["00100","00100","00100","00100","00100","00000","00100"],
+                '@': ["01110","10001","10111","10101","10111","10000","01111"],
+                '#': ["01010","01010","11111","01010","11111","01010","01010"],
+                '$': ["00100","01111","10100","01110","00101","11110","00100"],
+                '^': ["00100","01010","10001","00000","00000","00000","00000"],
+                '&': ["01100","10010","10100","01000","10101","10010","01101"],
+                '*': ["00000","10101","01110","11111","01110","10101","00000"],
+                '(': ["00010","00100","01000","01000","01000","00100","00010"],
+                ')': ["01000","00100","00010","00010","00010","00100","01000"],
+            };
+
+            // generateTextWall(lines, opts) — sinh mảng entries [x,y,z,w,h,d] cho nhiều dòng chữ, mỗi
+            // dòng center-align riêng theo dòng RỘNG NHẤT (không phải theo world gốc), để cả khối text
+            // nhìn thẳng hàng ở giữa dù độ dài từng dòng khác nhau (VD "WELCOME TO" ngắn hơn "GENSHIN
+            // IMPACT" — spec Hidden Update, checkpoint chữ WELCOME).
+            //   lines: mảng string, VD ["WELCOME TO", "GENSHIN IMPACT"]
+            //   opts.centerX/opts.topY/opts.z: tâm X, đỉnh Y của DÒNG ĐẦU TIÊN, và mặt phẳng Z cố định
+            //   opts.spacing: khoảng cách tâm-tâm giữa 2 pixel liền kề (>= blockSize để có khe hở)
+            //   opts.blockSize: cạnh khối lập phương (mặc định 2.0, khớp CLIMB_WALL_CONFIGS hiện có)
+            //   opts.lineGap: khoảng trống Y thêm giữa 2 dòng, ngoài 7 hàng của font (mặc định = spacing)
+            function generateTextWall(lines, opts) {
+                const { centerX = 0, topY = 0, z = 60, spacing = 2.5, blockSize = 2.0, lineGap = spacing } = opts;
+                const COLS = 5, ROWS = 7;
+                const entries = [];
+
+                // Bề rộng (số cột pixel, kể cả khoảng trắng giữa các chữ) của 1 dòng — dùng để center-align.
+                function lineWidthInCols(line) {
+                    // Mỗi ký tự chiếm COLS cột + 1 cột đệm ngăn cách với ký tự kế (trừ ký tự cuối).
+                    return line.length * COLS + (line.length - 1);
+                }
+                const maxCols = Math.max(...lines.map(lineWidthInCols));
+
+                lines.forEach((line, lineIndex) => {
+                    const lineCols = lineWidthInCols(line);
+                    // Căn giữa: dòng ngắn hơn dịch vào trong (maxCols - lineCols) / 2 cột so với dòng dài nhất.
+                    const startCol = (maxCols - lineCols) / 2;
+                    const lineTopY = topY - lineIndex * (ROWS * spacing + lineGap);
+
+                    let col = startCol;
+                    for (const ch of line) {
+                        const glyph = FONT_5x7[ch.toUpperCase()];
+                        if (!glyph) { col += COLS + 1; continue; } // ký tự không có trong font — bỏ qua, vẫn chừa chỗ
+
+                        for (let row = 0; row < ROWS; row++) {
+                            for (let c = 0; c < COLS; c++) {
+                                if (glyph[row][c] !== '1') continue;
+                                const x = centerX + (col + c - maxCols / 2) * spacing;
+                                const y = lineTopY - row * spacing;
+                                entries.push([x, y, z, blockSize, blockSize, blockSize]);
+                            }
+                        }
+                        col += COLS + 1; // qua ký tự kế, +1 cột đệm
+                    }
+                });
+
+                return entries;
+            }
+
+            // --- generateIconWall(grid, opts) — LƯỚI BIT TÙY Ý CHO ICON/LOGO/KÝ HIỆU ---
+            // Khác generateTextWall() ở chỗ KHÔNG ép cứng lưới 5x7 theo từng ký tự — nhận thẳng 1 lưới
+            // bit hình chữ nhật kích thước bất kỳ (VD 24x24 cho icon chi tiết, hay chữ nhật lệch như
+            // 30x18), phù hợp logo nguyên tố, hình vẽ tự do (trái tim, ngôi sao...), hoặc bất kỳ pixel
+            // art nào bạn tự phác thảo bằng chuỗi '0'/'1' viết tay theo từng hàng — cùng quy ước với
+            // FONT_5x7: hàng đầu tiên trong mảng = ĐỈNH hình, bit '1' = có khối, '0' = trống.
+            //   grid: mảng string, mỗi string 1 hàng, TẤT CẢ cùng độ dài (số cột phải đều nhau)
+            //   opts.centerX/opts.centerY/opts.z: tâm X, tâm Y (không phải đỉnh — icon thường muốn
+            //     canh giữa theo cả 2 trục thay vì theo đỉnh như dòng chữ dài)
+            //   opts.targetWidth: BỀ RỘNG MONG MUỐN theo mét — hàm tự tính spacing = targetWidth / số
+            //     cột, để tránh lặp lại lỗi tỉ lệ đã gặp với generateTextWall() (spacing cố định 2.5
+            //     từng khiến "GENSHIN IMPACT" rộng ~210m ngoài ý muốn). Bắt buộc cung cấp, không có
+            //     giá trị mặc định — buộc phải cân nhắc quy mô icon trước khi sinh khối.
+            //   opts.blockSizeRatio: blockSize = spacing * blockSizeRatio (mặc định 0.85 — khối gần
+            //     khít spacing nhưng vẫn có khe nhỏ phân biệt từng "pixel", đồng thời đủ lớn để leo
+            //     được ở target width vừa phải theo đúng lựa chọn đã chốt — "vẫn va chạm/leo được").
+            function generateIconWall(grid, opts) {
+                const { centerX = 0, centerY = 0, z = 60, targetWidth, blockSizeRatio = 0.85 } = opts;
+                if (!targetWidth) {
+                    console.warn('generateIconWall: thiếu opts.targetWidth — bắt buộc để tránh icon sinh ra sai tỉ lệ world.');
+                    return [];
+                }
+                const ROWS = grid.length;
+                const COLS = grid[0].length;
+                const spacing = targetWidth / COLS;
+                const blockSize = spacing * blockSizeRatio;
+                const entries = [];
+
+                for (let row = 0; row < ROWS; row++) {
+                    for (let c = 0; c < COLS; c++) {
+                        if (grid[row][c] !== '1') continue;
+                        const x = centerX + (c - COLS / 2) * spacing;
+                        const y = centerY + (ROWS / 2 - row) * spacing; // hàng đầu = đỉnh = Y lớn nhất
+                        entries.push([x, y, z, blockSize, blockSize, blockSize]);
+                    }
+                }
+                return entries;
+            }
             // Mỗi cụm núi giờ là NHIỀU khối hộp chữ nhật xếp lệch/chồng tầng (không còn 1 box đơn to
             // trơ trọi) — vẫn là AABB thẳng trục (bắt buộc, detectClimbableWall chỉ nhận diện đúng mặt
             // phẳng vuông góc X/Z) nhưng bố trí lệch tâm + kích thước giảm dần theo tầng để nhìn như
@@ -347,11 +486,29 @@
                 [-30.5, 4.6, 21.8, 2.6, 2.8, 2.8],   // tầng giữa trái
                 [-27.0, 4.4, 21.5, 2.4, 2.6, 2.6],   // tầng giữa phải
                 [-30.0, 6.6, 21.6, 1.8, 1.8, 2.0],    // đỉnh (lệch về phía trái, không đối xứng)
-                // --- Cụm C
+                // Núi
                 [41.0, 0.0, 25.0, 16.0, 25.0, 16.0],
                 [36.0, 0.0, 28.0, 15.0, 31.0, 15.0],
                 [45.0, 0.0, 35.0, 9.0, 38.0, 9.0],
                 [40.0, 0.0, 30.0, 8.0, 50.0, 8.0],
+
+                // Welcome (Hidden Update — checkpoint chữ WELCOME): thay toàn bộ khối gõ tay cũ (14
+                // khối zigzag riêng cho chữ W, các chữ còn lại chưa làm) bằng generateTextWall() — 1
+                // dòng cấu hình sinh ra cả 2 dòng chữ, đồng bộ font 5x7 cho MỌI ký tự kể cả W (không
+                // còn kiểu zigzag khác biệt của bản cũ). Đổi text/vị trí/spacing chỉ cần sửa object
+                // dưới đây, không đụng gì logic generateTextWall() hay createObstacles().
+                // LƯU Ý TỈ LỆ: spacing 2.5 (bằng blockSize gốc 2.0 của chữ W cũ) khiến dòng dài nhất
+                // "GENSHIN IMPACT" (14 ký tự, 83 cột font) rộng tới ~210m — quá khổ so với world hiện
+                // tại (~±40m quanh các cụm núi). Đã hạ spacing xuống 0.9 + blockSize 0.8 (90% spacing,
+                // khối vẫn đủ lớn để leo được) để dòng dài nhất còn ~75m — quy mô landmark nhìn từ xa
+                // theo đúng lựa chọn đã chốt, không còn nuốt hết bản đồ.
+                ...generateTextWall(["WELCOME TO", "GENSHIN IMPACT :)"], {
+                    centerX: 0.0,   // tâm X ước lượng quanh vị trí chữ W cũ (30 → 12), giữ nguyên khu vực
+                    topY: 25.0,      // đỉnh dòng đầu — khớp Y cao nhất của chữ W cũ
+                    z: 60.0,
+                    spacing: 1.25,
+                    blockSize: 1.5,
+                }),
             ];
 
             function createObstacles() {
@@ -379,6 +536,8 @@
                     obstacles.push({ mesh, aabb }); obstacleMeshes.push(mesh);
                 });
             }
+
+
 
 
 

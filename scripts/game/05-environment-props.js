@@ -15,7 +15,7 @@
             const PROP_FACTORIES = {
                 tree(rng) {
                     const group = new THREE.Group();
-                    const trunkH = 1.8 + rng() * 1.2;
+                    const trunkH = 5.0 + rng() * 1.2;
                     const trunkGeo = new THREE.CylinderGeometry(0.18, 0.24, trunkH, 7);
                     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 1.0 });
                     const trunk = new THREE.Mesh(trunkGeo, trunkMat);
@@ -25,9 +25,9 @@
 
                     const leavesColors = [0x4d7c4a, 0x5b8c52, 0x3f6b3d];
                     const leavesMat = new THREE.MeshStandardMaterial({ color: leavesColors[Math.floor(rng() * leavesColors.length)], roughness: 0.95 });
-                    const leafCount = 2 + Math.floor(rng() * 2);
+                    const leafCount = 3 + Math.floor(rng() * 2);
                     for (let i = 0; i < leafCount; i++) {
-                        const r = 1.0 + rng() * 0.5 - i * 0.15;
+                        const r = 2.0 + rng() * 0.5 - i * 0.15;
                         const leafGeo = new THREE.SphereGeometry(Math.max(0.5, r), 8, 6);
                         const leaf = new THREE.Mesh(leafGeo, leavesMat);
                         leaf.position.set((rng() - 0.5) * 0.6, trunkH + i * 0.7, (rng() - 0.5) * 0.6);
@@ -37,7 +37,7 @@
                     return group;
                 },
                 rock(rng) {
-                    const scale = 0.4 + rng() * 0.7;
+                    const scale = 0.9 + rng() * 0.9;
                     const geo = new THREE.DodecahedronGeometry(scale, 0);
                     const mat = new THREE.MeshStandardMaterial({ color: 0x8a8478, roughness: 1.0 });
                     const rock = new THREE.Mesh(geo, mat);
@@ -51,9 +51,9 @@
                 bush(rng) {
                     const group = new THREE.Group();
                     const mat = new THREE.MeshStandardMaterial({ color: 0x5a8a4e, roughness: 0.95 });
-                    const clumps = 2 + Math.floor(rng() * 2);
+                    const clumps = 3 + Math.floor(rng() * 2);
                     for (let i = 0; i < clumps; i++) {
-                        const r = 0.32 + rng() * 0.2;
+                        const r = 0.75 + rng() * 0.2;
                         const geo = new THREE.SphereGeometry(r, 7, 5);
                         const mesh = new THREE.Mesh(geo, mat);
                         mesh.position.set((rng() - 0.5) * 0.5, r * 0.75, (rng() - 0.5) * 0.5);
@@ -65,7 +65,7 @@
                 flowerPatch(rng) {
                     const group = new THREE.Group();
                     const petalColors = [0xf472b6, 0xfbbf24, 0xf87171, 0xa78bfa];
-                    const count = 4 + Math.floor(rng() * 4);
+                    const count = 30 + Math.floor(rng() * 6);
                     for (let i = 0; i < count; i++) {
                         const color = petalColors[Math.floor(rng() * petalColors.length)];
                         const stemMat = new THREE.MeshStandardMaterial({ color: 0x4d7c4a, roughness: 1.0 });
@@ -82,7 +82,7 @@
                 },
                 stump(rng) {
                     const group = new THREE.Group();
-                    const h = 0.35 + rng() * 0.15;
+                    const h = 0.6 + rng() * 0.15;
                     const geo = new THREE.CylinderGeometry(0.32, 0.36, h, 10);
                     const mat = new THREE.MeshStandardMaterial({ color: 0x7a5738, roughness: 1.0 });
                     const stump = new THREE.Mesh(geo, mat);
@@ -106,7 +106,7 @@
                 // (ngoài khả năng của Pre-Alpha, và không cần thiết để đạt đúng tinh thần yêu cầu).
                 forestTree(rng) {
                     const group = new THREE.Group();
-                    const trunkH = 3.4 + rng() * 1.8; // ~2x cây thường (1.8-3.0 -> 3.4-5.2)
+                    const trunkH = 5.0 + rng() * 3.0; // ~2x cây thường (1.8-3.0 -> 3.4-5.2)
                     const trunkGeo = new THREE.CylinderGeometry(0.28, 0.38, trunkH, 8);
                     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5a3f26, roughness: 1.0 });
                     const trunk = new THREE.Mesh(trunkGeo, trunkMat);
@@ -119,7 +119,7 @@
                     const leavesMat = new THREE.MeshStandardMaterial({ color: leavesColors[Math.floor(rng() * leavesColors.length)], roughness: 1.0 });
                     const leafCount = 4 + Math.floor(rng() * 3);
                     for (let i = 0; i < leafCount; i++) {
-                        const r = 1.9 + rng() * 0.9 - i * 0.18;
+                        const r = 3.0 + rng() * 0.9 - i * 0.18;
                         const leafGeo = new THREE.SphereGeometry(Math.max(1.0, r), 8, 6);
                         const leaf = new THREE.Mesh(leafGeo, leavesMat);
                         leaf.position.set((rng() - 0.5) * 1.1, trunkH + i * 1.05, (rng() - 0.5) * 1.1);
@@ -136,7 +136,7 @@
                 // ngẫu nhiên không liên quan tới hình dạng cây.
                 appleTree(rng) {
                     const group = new THREE.Group();
-                    const trunkH = 1.6 + rng() * 0.6;
+                    const trunkH = 4.0 + rng() * 0.6;
                     const trunkGeo = new THREE.CylinderGeometry(0.16, 0.22, trunkH, 7);
                     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 1.0 });
                     const trunk = new THREE.Mesh(trunkGeo, trunkMat);
@@ -146,7 +146,7 @@
 
                     const leavesMat = new THREE.MeshStandardMaterial({ color: 0x5f9c4f, roughness: 0.9 });
                     const canopyY = trunkH + 0.6;
-                    const canopyRadius = 1.1 + rng() * 0.3;
+                    const canopyRadius = 2.1 + rng() * 0.3;
                     const canopy = new THREE.Mesh(new THREE.SphereGeometry(canopyRadius, 10, 8), leavesMat);
                     canopy.position.y = canopyY;
                     canopy.castShadow = true; canopy.receiveShadow = true;
@@ -237,7 +237,7 @@
                 {
                     id: 'forest_west',
                     x: -22, z: -28,
-                    radius: 17,
+                    radius: 20,
                     treeDensity: 42,
                     collectibleCounts: { mushroom: 10, berry: 6 },
                     appleTreeCount: 4,
@@ -673,3 +673,4 @@
             //              Camp có thể tự cấu hình loại Chest mà không phụ thuộc số lượng/loại quái") —
             //              hiện tại được gán thủ công dựa trên quy mô camp cho hợp lý, nhưng có thể đổi
             //              tùy ý cho từng camp mà không ảnh hưởng gì tới slime/spawn logic.
+

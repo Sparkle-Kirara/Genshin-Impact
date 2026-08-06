@@ -74,74 +74,27 @@
                     }
                 }
 
-                // --- TIÊU HAO VÀ HỒI PHỤC THỂ LỰC (v0.8.0) ---
-                let staminaCost = 0;
-                let isConsumingStamina = false;
-
-                if (player.isClimbing) {
-                    let isMovingOnWall = false;
-                    if (joystickActive && (Math.abs(joystickDelta.x) > 0.1 || Math.abs(joystickDelta.y) > 0.1)) {
-                        isMovingOnWall = true;
-                    } else if (keys.w || keys.s || keys.a || keys.d) {
-                        isMovingOnWall = true;
-                    }
-                    
-                    if (player.climbJumpTimer > 0) {
-                        // Nhảy leo núi (tiêu tốn stamina nhảy tức thời đã tính khi nhấn nút, không nhân liên tục)
-                    } else if (isMovingOnWall) {
-                        staminaCost = 8.0 * dt; // Di chuyển trên tường: -8/giây
-                        isConsumingStamina = true;
-                    }
-                } else if (player.isSwimming) {
-                    if (player.swimState === 'fast') {
-                        staminaCost = 12.0 * dt; // Bơi nhanh: -12/giây
-                        isConsumingStamina = true;
-                    }
-                } else {
-                    if (player.isSprinting) {
-                        staminaCost = 10.0 * dt; // Chạy nhanh trên cạn: -10/giây
-                        isConsumingStamina = true;
-                    }
-                }
-
-                if (isConsumingStamina) {
-                    player.stamina = Math.max(0, player.stamina - staminaCost);
-                } else {
-                    // Hồi phục thể lực khi không tiêu hao
-                    let regenRate = 25.0 * dt; // Hồi phục bình thường trên cạn: +25/giây
-                    if (player.isSwimming) {
-                        regenRate = 5.0 * dt; // Bơi thong thả/idle dưới nước hồi cực chậm: +5/giây
-                    }
-                    player.stamina = Math.min(player.maxStamina, player.stamina + regenRate);
-                }
-
-                // --- STAMINA RESOLUTION TRIGGER ---
-                if (player.stamina <= 0) {
-                    if (player.isClimbing) {
-                        // Kiệt sức khi đang leo núi: Buông tay ngã tự do!
-                        player.isClimbing = false;
-                        player.velocity.set(0, -3.0, 0); 
-                        sfx.playBlockedSound();
-                    } else if (player.isSwimming) {
-                        // Kiệt sức khi đang bơi sâu: Kích hoạt Đuối Nước!
-                        triggerDrowningSequence();
-                        return; // Ngắt update vật lý hiện tại
-                    } else if (player.isSprinting) {
-                        // Kiệt sức khi chạy nhanh: Cưỡng chế đi bộ/chạy thường
-                        player.isSprinting = false;
-                    }
-                    
-                    if (player.swimState === 'fast') {
-                        player.swimState = 'slow'; // Ép giảm tốc bơi
-                    }
-                }
+                // --- TIÊU HAO VÀ HỒI PHỤC THỂ LỰC ---
+                // Toàn bộ logic đã tách sang updateStamina() (định nghĩa bên dưới updatePhysics) — xem
+                // hàm đó cho state machine đầy đủ theo từng trạng thái (Sprint/Dash/Climb/ClimbJump/
+                // Glide/SwimStroke/SwimSprint/Idle) và STAMINA_CONFIG (02-collision-and-stats-core.js)
+                // cho toàn bộ thông số. Giữ NGUYÊN vị trí gọi ở đây (trước khối input-movement phía
+                // dưới xác định lại isSprinting/swimState của frame này) — hành vi cũ vốn dùng state
+                // của FRAME TRƯỚC để tính tiêu hao frame này, không đảo thứ tự để tránh phá vỡ Movement.
+                updateStamina(dt);
+                // Lưu ý: nếu updateStamina() vừa gọi triggerDrowningSequence(), nó set
+                // player.isDrowning = true NGAY (isDead chỉ true sau 1000ms qua setTimeout riêng) — vì
+                // guard "if (player.isDrowning) return;" đã có sẵn ở ĐẦU updatePhysics() (phía trên),
+                // toàn bộ phần còn lại của FRAME NÀY vẫn chạy tiếp bình thường 1 lần cuối (vô hại, vì
+                // triggerDrowningSequence() đã tự set velocity/inputVelocity về gần như đứng yên), và
+                // guard đó sẽ tự chặn hoàn toàn từ FRAME KẾ TIẾP trở đi — không cần return thêm ở đây.
 
                 // --- CẬP NHẬT GIAO DIỆN VÒNG THỂ LỰC DI ĐỘNG ---
                 if (staminaContainer && staminaRing) {
                     const pct = player.stamina / player.maxStamina;
                     
-                    // Chỉ hiển thị khi stamina sụt giảm dưới 98%
-                    if (pct < 0.98) {
+                    // Chỉ hiển thị khi stamina sụt giảm dưới ngưỡng UI_VISIBLE_THRESHOLD_PCT
+                    if (pct < STAMINA_CONFIG.UI_VISIBLE_THRESHOLD_PCT) {
                         staminaContainer.style.opacity = '1';
                         // Chiếu tọa độ 3D nhân vật sang 2D màn hình phẳng
                         const tempV = new THREE.Vector3();
@@ -159,8 +112,8 @@
                         const dashOffset = 100 - (pct * 100);
                         staminaRing.style.strokeDashoffset = dashOffset;
                         
-                        // Đổi màu đỏ khi thể lực cực thấp (dưới 20%)
-                        if (pct < 0.22) {
+                        // Đổi màu đỏ khi thể lực xuống dưới UI_LOW_WARNING_THRESHOLD_PCT
+                        if (pct < STAMINA_CONFIG.UI_LOW_WARNING_THRESHOLD_PCT) {
                             staminaRing.className.baseVal = "text-red-500 transition-all duration-75";
                         } else {
                             staminaRing.className.baseVal = "text-amber-400 transition-all duration-75";
@@ -277,7 +230,7 @@
 
                     // Quản lý trạng thái Bơi (Fast dần decay về Slow nếu không còn giữ Input hoặc hết Timer)
                     if (player.swimState === 'fast') {
-                        if (player.stamina <= 0) {
+                        if (player.stamina <= STAMINA_CONFIG.MIN_STAMINA) {
                             player.swimState = 'slow';
                         } else if (player.swimFastTimer > 0) {
                             player.swimFastTimer -= dt;
@@ -291,7 +244,14 @@
                         }
                     } else {
                         if (hasMovementInput) {
-                            player.swimState = (keys.dash && player.stamina > 0) ? 'fast' : 'slow';
+                            const enteringSwimSprint = (player.swimState !== 'fast') && keys.dash && player.stamina > STAMINA_CONFIG.MIN_STAMINA;
+                            player.swimState = (keys.dash && player.stamina > STAMINA_CONFIG.MIN_STAMINA) ? 'fast' : 'slow';
+                            if (enteringSwimSprint) {
+                                // Swim Sprint — trừ SWIM_SPRINT_START_COST TỨC THỜI đúng 1 lần tại thời
+                                // điểm CHUYỂN sang 'fast' (không phải mỗi frame đang ở 'fast' — phần đó
+                                // đã xử lý riêng ở updateStamina()/STAMINA_CONFIG.SWIM_SPRINT_COST_PER_SECOND).
+                                player.stamina = Math.max(STAMINA_CONFIG.MIN_STAMINA, player.stamina - STAMINA_CONFIG.SWIM_SPRINT_START_COST);
+                            }
                         } else {
                             player.swimState = 'idle';
                         }
@@ -325,47 +285,66 @@
                 }
                 else if (!player.isDashing && !player.isClimbing) {
                     // GROUNDED / AIRBORNE MOVEMENT LOGIC
-                    let moveX = 0, moveZ = 0;
-                    if (joystickActive) { moveX = joystickDelta.x; moveZ = joystickDelta.y; } 
-                    else {
-                        if (keys.w) moveZ = -1; if (keys.s) moveZ = 1;
-                        if (keys.a) moveX = -1; if (keys.d) moveX = 1;
-                    }
 
-                    const camForward = new THREE.Vector3(); camera.getWorldDirection(camForward); camForward.y = 0; camForward.normalize();
-                    const camRight = new THREE.Vector3(); camRight.crossVectors(camForward, new THREE.Vector3(0, 1, 0)).normalize();
-                    const moveDirection = new THREE.Vector3(); moveDirection.addScaledVector(camForward, -moveZ); moveDirection.addScaledVector(camRight, moveX);   
+                    // --- FALLING INPUT LOCK (Pre-Alpha Stabilization) ---
+                    // "Falling" ở đây = đang trên không, KHÔNG Gliding/Climbing/Swimming/Dashing (2 vế
+                    // sau đã tự loại trừ bởi điều kiện `else if` bao ngoài) — bao gồm CẢ pha đang nhảy
+                    // lên (velocity.y > 0) LẪN pha đang rơi xuống, ngay khi rời mặt đất cho tới khi
+                    // chạm đất hoặc chuyển sang Gliding (quyết định đã chốt trong lịch sử trò chuyện).
+                    // Khi true: người chơi vẫn có thể GIỮ AWSD/joystick (không có gì ngăn input), nhưng
+                    // input đó KHÔNG được đọc/xử lý ở đây — velocity.x/z và lastMovementDirection giữ
+                    // NGUYÊN giá trị từ frame trước (đà quán tính lúc rời đất), không lerp theo hướng
+                    // mới. Đặt SAU "!isDashing && !isClimbing" nhưng TRƯỚC khi đọc bất kỳ input nào, để
+                    // không tính toán/ghi đè gì cả trong nhánh này khi đang Falling.
+                    const isFalling = !player.isGrounded && !player.isGliding;
 
-                    const hasMovementInput = moveDirection.lengthSq() > 0.01;
-                    if (hasMovementInput) { moveDirection.normalize(); player.lastMovementDirection.copy(moveDirection); }
+                    if (isFalling) {
+                        // Không đọc keys/joystick, không đổi velocity.x/z, không đổi
+                        // lastMovementDirection — nhân vật giữ nguyên quỹ đạo ngang đã có lúc rời đất,
+                        // chỉ rơi thẳng theo trọng lực (gravity xử lý ở khối XỬ LÝ LỰC phía trên).
+                    } else {
+                        let moveX = 0, moveZ = 0;
+                        if (joystickActive) { moveX = joystickDelta.x; moveZ = joystickDelta.y; } 
+                        else {
+                            if (keys.w) moveZ = -1; if (keys.s) moveZ = 1;
+                            if (keys.a) moveX = -1; if (keys.d) moveX = 1;
+                        }
 
-                    if (!keys.dash || !hasMovementInput || player.walkMode || player.isGliding || player.stamina <= 0) {
-                        player.isSprinting = false;
-                    } else if (player.isGrounded && !player.isDashing) {
-                        player.isSprinting = true;
-                    }
+                        const camForward = new THREE.Vector3(); camera.getWorldDirection(camForward); camForward.y = 0; camForward.normalize();
+                        const camRight = new THREE.Vector3(); camRight.crossVectors(camForward, new THREE.Vector3(0, 1, 0)).normalize();
+                        const moveDirection = new THREE.Vector3(); moveDirection.addScaledVector(camForward, -moveZ); moveDirection.addScaledVector(camRight, moveX);   
 
-                    let activeMaxSpeed = player.speed;
-                    if (player.isGliding) activeMaxSpeed = 9.2; 
-                    else if (player.walkMode) activeMaxSpeed = player.walkSpeed;
-                    else if (player.isSprinting) activeMaxSpeed = player.sprintSpeed;
+                        const hasMovementInput = moveDirection.lengthSq() > 0.01;
+                        if (hasMovementInput) { moveDirection.normalize(); player.lastMovementDirection.copy(moveDirection); }
 
-                    // Aim Mode của Elemental Skill: chặn hoàn toàn di chuyển (targetSpeed = 0), giống
-                    // cách Genshin khóa chân nhân vật khi giương cung — nhưng KHÔNG chặn camera, người
-                    // chơi vẫn xoay hướng ngắm tự do (xử lý riêng trong updateCamera, không đụng ở đây).
-                    const targetSpeed = skillAimState.phase === 'aiming' ? 0 : (hasMovementInput ? (player.attackState !== 'idle' ? activeMaxSpeed * 0.35 : activeMaxSpeed) : 0);
+                        if (!keys.dash || !hasMovementInput || player.walkMode || player.isGliding || player.stamina <= STAMINA_CONFIG.MIN_STAMINA) {
+                            player.isSprinting = false;
+                        } else if (player.isGrounded && !player.isDashing) {
+                            player.isSprinting = true;
+                        }
+
+                        let activeMaxSpeed = player.speed;
+                        if (player.isGliding) activeMaxSpeed = 9.2; 
+                        else if (player.walkMode) activeMaxSpeed = player.walkSpeed;
+                        else if (player.isSprinting) activeMaxSpeed = player.sprintSpeed;
+
+                        // Aim Mode của Elemental Skill: chặn hoàn toàn di chuyển (targetSpeed = 0), giống
+                        // cách Genshin khóa chân nhân vật khi giương cung — nhưng KHÔNG chặn camera, người
+                        // chơi vẫn xoay hướng ngắm tự do (xử lý riêng trong updateCamera, không đụng ở đây).
+                        const targetSpeed = skillAimState.phase === 'aiming' ? 0 : (hasMovementInput ? (player.attackState !== 'idle' ? activeMaxSpeed * 0.35 : activeMaxSpeed) : 0);
                     
-                    const lerpFactor = targetSpeed > 0 ? (player.acceleration * dt) : (player.deceleration * dt);
-                    const desiredVelocity = moveDirection.clone().multiplyScalar(targetSpeed);
-                    player.inputVelocity.lerp(desiredVelocity, Math.min(lerpFactor, 1));
+                        const lerpFactor = targetSpeed > 0 ? (player.acceleration * dt) : (player.deceleration * dt);
+                        const desiredVelocity = moveDirection.clone().multiplyScalar(targetSpeed);
+                        player.inputVelocity.lerp(desiredVelocity, Math.min(lerpFactor, 1));
 
-                    player.velocity.x = player.inputVelocity.x; 
-                    player.velocity.z = player.inputVelocity.z;
+                        player.velocity.x = player.inputVelocity.x; 
+                        player.velocity.z = player.inputVelocity.z;
 
-                    if (player.isSprinting && hasMovementInput && player.isGrounded && Math.random() < 0.3) {
-                        spawnRunTrail(player.position, player.lastMovementDirection);
-                    } else if (hasMovementInput && player.isGrounded && !player.walkMode && Math.random() < 0.15) {
-                        spawnRunTrail(player.position, player.lastMovementDirection);
+                        if (player.isSprinting && hasMovementInput && player.isGrounded && Math.random() < 0.3) {
+                            spawnRunTrail(player.position, player.lastMovementDirection);
+                        } else if (hasMovementInput && player.isGrounded && !player.walkMode && Math.random() < 0.15) {
+                            spawnRunTrail(player.position, player.lastMovementDirection);
+                        }
                     }
                 }
 
@@ -416,10 +395,11 @@
                     if (player.isSwimming) {
                         // Chặn nhảy từ trong nước
                     } else if (player.isClimbing) {
-                        // STAMINA JUMP COST: Tiêu hao 22 thể lực khi nhảy leo núi
-                        if (player.stamina >= 22.0) {
+                        // STAMINA JUMP COST: dùng STAMINA_CONFIG.CLIMB_JUMP_COST (25.0) — không đủ thì
+                        // không cho Climb Jump, không trừ âm (đúng spec).
+                        if (player.stamina >= STAMINA_CONFIG.CLIMB_JUMP_COST) {
                             player.climbJumpTimer = 0.25; 
-                            player.stamina = Math.max(0, player.stamina - 22.0);
+                            player.stamina = Math.max(STAMINA_CONFIG.MIN_STAMINA, player.stamina - STAMINA_CONFIG.CLIMB_JUMP_COST);
                             playtestMetrics.jumps++;
                         } else {
                             sfx.playBlockedSound();
@@ -443,8 +423,18 @@
                 // Khi đang ở trên không: cập nhật lên giá trị Y cao nhất đã đạt được.
                 // Nhờ dựa vào "đỉnh cao nhất" thay vì Y lúc rời đất, các trường hợp bật nhảy
                 // liên tiếp trên không (VD nhảy leo tường) vẫn được tính đúng độ cao rơi thực tế.
+                //
+                // BUGFIX (Pre-Alpha Stabilization — xem deactivateGlider() trong
+                // 06-camps-save-system.js cho lý do đầy đủ): trong lúc isGliding=true, KHÔNG cập nhật
+                // "đỉnh cao nhất" — deactivateGlider() sẽ tự reset fallStartY về đúng độ cao hiện tại
+                // ngay khi thoát Glide (bất kể lý do thoát), coi mỗi lần thoát Glide là khởi đầu 1 chu
+                // kỳ rơi MỚI. Bỏ qua tường minh ở đây (thay vì chỉ dựa vào deactivateGlider() ghi đè
+                // sau) để không phụ thuộc ngầm vào thứ tự gọi hàm — rõ ràng: đang Glide thì fallStartY
+                // đứng yên, không tăng theo đỉnh cao đạt được trong lúc lượn.
                 if (player.isGrounded) {
                     player.fallStartY = player.position.y;
+                } else if (player.isGliding) {
+                    // Giữ nguyên fallStartY hiện tại — không cập nhật trong lúc đang lượn.
                 } else if (!Number.isNaN(player.fallStartY)) {
                     player.fallStartY = Math.max(player.fallStartY, player.position.y);
                 } else {
@@ -800,6 +790,185 @@
                 if (window.updateInteractPrompt) window.updateInteractPrompt(closestInteractable);
 
                 syncHUDVariables();
+            }
+
+            // --- updateStamina(dt) — Pre-Alpha Stabilization: Stamina System Rework ---
+            // Tách hoàn toàn khỏi updatePhysics() để dễ đọc/bảo trì/mở rộng — mọi thông số lấy từ
+            // STAMINA_CONFIG (02-collision-and-stats-core.js), không hardcode số nào ở đây. Được gọi ở
+            // ĐÚNG vị trí cũ trong updatePhysics() (trước khối input-movement xác định lại
+            // isSprinting/swimState của frame hiện tại) — giữ nguyên hành vi "dùng state frame trước để
+            // tính tiêu hao frame này" của bản gốc, không đảo thứ tự.
+            //
+            // STATE MACHINE — đúng 8 trạng thái theo spec, mỗi trạng thái xác định rõ CÓ tiêu hao hay
+            // không / tiêu bao nhiêu / CÓ được hồi hay không:
+            //   Idle/Walking/Running (không Sprint, không Dash, không Climb/Swim/Glide) → được hồi (sau delay)
+            //   Sprint       → tiêu SPRINT_COST_PER_SECOND/s, chặn hồi, reset delay
+            //   Dash         → tiêu DASH_COST tức thời (xử lý ở triggerDash(), KHÔNG ở đây) + trong suốt
+            //                   animation Dash (isDashing=true) vẫn chặn hồi/reset delay như Sprint
+            //   Climbing     → di chuyển trên tường: tiêu CLIMB_COST_PER_SECOND/s; đứng yên trên tường: không tiêu
+            //   Climb Jump   → tiêu CLIMB_JUMP_COST tức thời (xử lý ở nhánh jumpRequested phía dưới, KHÔNG ở đây)
+            //   Swimming     → xem 3 nhánh con: Swim Stroke / Swim Sprint / Floating-Idle
+            //   Gliding      → tiêu GLIDE_COST_PER_SECOND/s liên tục
+            //
+            // Dash và Climb Jump tiêu hao TỨC THỜI tại đúng thời điểm hành động xảy ra (không phải mỗi
+            // frame) nên vẫn nằm ở triggerDash()/nhánh jumpRequested như bản gốc — updateStamina() chỉ
+            // xử lý phần LIÊN TỤC theo dt + cờ chặn-hồi khi các hành động đó đang diễn ra.
+            function updateStamina(dt) {
+                let isConsumingStamina = false; // true → chặn hồi phục + reset regen delay timer frame này
+
+                if (player.isClimbing) {
+                    // --- CLIMBING ---
+                    let isMovingOnWall = false;
+                    if (joystickActive && (Math.abs(joystickDelta.x) > 0.1 || Math.abs(joystickDelta.y) > 0.1)) {
+                        isMovingOnWall = true;
+                    } else if (keys.w || keys.s || keys.a || keys.d) {
+                        isMovingOnWall = true;
+                    }
+
+                    if (player.climbJumpTimer > 0) {
+                        // Climb Jump: chi phí tức thời đã trừ ở nhánh jumpRequested (25.0 —
+                        // STAMINA_CONFIG.CLIMB_JUMP_COST) — không trừ thêm liên tục ở đây, nhưng VẪN
+                        // coi là đang tiêu hao để chặn hồi phục trong lúc animation nhảy-leo diễn ra.
+                        isConsumingStamina = true;
+                    } else if (isMovingOnWall) {
+                        player.stamina = Math.max(STAMINA_CONFIG.MIN_STAMINA, player.stamina - STAMINA_CONFIG.CLIMB_COST_PER_SECOND * dt);
+                        isConsumingStamina = true;
+                    }
+                    // Đứng yên trên tường (không di chuyển, không vừa nhảy) → không tiêu, nhưng cũng
+                    // KHÔNG hồi (Climbing không nằm trong danh sách "được hồi" của spec — chỉ Idle mới
+                    // hồi). isConsumingStamina giữ false ở nhánh này là ĐÚNG Ý: không tiêu VÀ không hồi,
+                    // xử lý bằng cách bỏ qua regen thay vì thêm cờ riêng — xem khối regen bên dưới.
+
+                    if (player.stamina <= STAMINA_CONFIG.MIN_STAMINA) {
+                        // Hết Stamina khi đang leo: mất lực bám, hủy Climbing, rơi tự do.
+                        player.isClimbing = false;
+                        player.velocity.set(0, -3.0, 0);
+                        sfx.playBlockedSound();
+                    }
+
+                } else if (player.isSwimming) {
+                    // --- SWIMMING: 3 nhánh con — Swim Sprint / Swim Stroke / Floating-Idle ---
+                    if (player.swimState === 'fast') {
+                        // Swim Sprint: chi phí KHỞI ĐỘNG (SWIM_SPRINT_START_COST) đã trừ tức thời tại
+                        // đúng thời điểm chuyển sang 'fast' (xem nhánh gán swimState='fast' trong khối
+                        // input-movement bên dưới, updatePhysics()) — ở đây chỉ trừ phần LIÊN TỤC.
+                        // Swim Stroke Timer KHÔNG chạy trong trạng thái này (đúng spec).
+                        player.stamina = Math.max(STAMINA_CONFIG.MIN_STAMINA, player.stamina - STAMINA_CONFIG.SWIM_SPRINT_COST_PER_SECOND * dt);
+                        isConsumingStamina = true;
+                        player.swimStrokeTimer = 0.0; // reset để không cộng dồn sai khi rời Swim Sprint
+
+                        if (player.stamina <= STAMINA_CONFIG.MIN_STAMINA) {
+                            // LỖ HỔNG ĐÃ VÁ (xem lịch sử trò chuyện): nếu chỉ chuyển về 'slow' mà không
+                            // trigger gì, Swim Stroke Timer ở nhánh 'slow' bên dưới sẽ KHÔNG BAO GIỜ
+                            // chạy được (bị chặn bởi "stamina > MIN_STAMINA") — nhân vật sẽ kẹt bơi
+                            // 'slow' với 0 stamina vĩnh viễn, không bao giờ kích hoạt đuối nước. Quyết
+                            // định đã chốt: coi Swim Sprint cạn sạch = hết sức NGAY, không chờ 1 Swim
+                            // Stroke hoàn thành như nhánh 'slow' thường.
+                            player.swimState = 'slow';
+                            player.isStaminaExhausted = true;
+                            triggerDrowningSequence();
+                            return;
+                        }
+                    } else if (player.swimState === 'slow') {
+                        // Swim Stroke: bơi thường + đang di chuyển. Trừ theo NHỊP (mỗi
+                        // SWIM_STROKE_INTERVAL giây trừ SWIM_STROKE_COST 1 lần), KHÔNG trừ theo dt mỗi
+                        // frame — bộ đếm này ĐỘC LẬP hoàn toàn với swimOscillationTimer (chỉ phục vụ
+                        // animation/tilt mesh, xem updatePhysics() phần XOAY/NGHIÊNG KHI BƠI).
+                        isConsumingStamina = true; // đang bơi chủ động → chặn hồi phục dù có thể chưa tới nhịp trừ
+
+                        if (player.stamina > STAMINA_CONFIG.MIN_STAMINA) {
+                            player.swimStrokeTimer += dt;
+                            if (player.swimStrokeTimer >= STAMINA_CONFIG.SWIM_STROKE_INTERVAL) {
+                                player.swimStrokeTimer -= STAMINA_CONFIG.SWIM_STROKE_INTERVAL; // giữ phần dư thay vì reset về 0 tuyệt đối — tránh trôi nhịp khi dt không đều
+                                player.stamina = Math.max(STAMINA_CONFIG.MIN_STAMINA, player.stamina - STAMINA_CONFIG.SWIM_STROKE_COST);
+
+                                if (player.stamina <= STAMINA_CONFIG.MIN_STAMINA) {
+                                    // Đúng spec "Hết Stamina": Stroke hiện tại vẫn hoàn thành bình
+                                    // thường (đã trừ ở trên, clamp về 0), nhưng KHÔNG được bắt đầu
+                                    // Stroke tiếp theo — chặn bằng isStaminaExhausted, timer đứng yên.
+                                    player.isStaminaExhausted = true;
+                                    player.swimStrokeTimer = 0.0;
+                                }
+                            }
+                        }
+                    } else {
+                        // Floating/Idle trong nước (swimState === 'idle'): hoàn toàn trung lập — không
+                        // tiêu, không hồi. isConsumingStamina giữ false nhưng khối regen bên dưới sẽ
+                        // TỰ BỎ QUA nhánh idle-swim nhờ kiểm tra player.isSwimming riêng — xem dưới.
+                        player.swimStrokeTimer = 0.0; // reset để lần bơi tiếp theo bắt đầu nhịp mới, không cộng dồn thời gian đứng yên
+                    }
+
+                    // Kích hoạt Đuối Nước khi Swim Stroke cạn sạch Stamina (nhánh 'fast'/Swim Sprint đã
+                    // tự xử lý + return riêng ở trên) — giữ đúng hành vi gốc: ngắt update vật lý ngay
+                    // khi trigger.
+                    if (player.stamina <= STAMINA_CONFIG.MIN_STAMINA && player.isStaminaExhausted) {
+                        triggerDrowningSequence();
+                        return; // Ngắt updateStamina() — updatePhysics() cũng return theo do isDead sẽ true
+                    }
+
+                } else if (player.isGliding) {
+                    // --- GLIDING (MỚI — trước đây không tiêu hao gì) ---
+                    player.stamina = Math.max(STAMINA_CONFIG.MIN_STAMINA, player.stamina - STAMINA_CONFIG.GLIDE_COST_PER_SECOND * dt);
+                    isConsumingStamina = true;
+
+                    if (player.stamina <= STAMINA_CONFIG.MIN_STAMINA) {
+                        // Hết Stamina khi lượn: kết thúc Gliding, rơi tự do (deactivateGlider() đã tắt
+                        // isGliding + ẩn glider mesh; velocity giữ nguyên, gravity ở khối XỬ LÝ LỰC phía
+                        // trên updatePhysics() sẽ tự kéo nhân vật rơi ngay khung hình kế tiếp).
+                        deactivateGlider();
+                    }
+
+                } else {
+                    // --- ON-GROUND: Idle / Walking / Running / Sprint ---
+                    if (player.isSprinting || player.isDashing) {
+                        // Sprint: tiêu liên tục theo dt. Dash: chi phí tức thời đã trừ ở triggerDash()
+                        // (STAMINA_CONFIG.DASH_COST), ở đây KHÔNG trừ thêm liên tục — nhưng suốt thời
+                        // gian animation Dash (isDashing=true) vẫn coi là đang tiêu hao để chặn hồi
+                        // phục + reset delay, đúng spec "Dash ngay lập tức hủy hồi, reset bộ đếm 1.5s".
+                        if (player.isSprinting) {
+                            player.stamina = Math.max(STAMINA_CONFIG.MIN_STAMINA, player.stamina - STAMINA_CONFIG.SPRINT_COST_PER_SECOND * dt);
+                        }
+                        isConsumingStamina = true;
+
+                        if (player.stamina <= STAMINA_CONFIG.MIN_STAMINA && player.isSprinting) {
+                            // Hết Stamina khi Sprint: tự động dừng Sprint, chuyển về chạy/đi bộ thường.
+                            player.isSprinting = false;
+                        }
+                    }
+                    // Idle/Walking/Running (không Sprint không Dash) → isConsumingStamina giữ false,
+                    // rơi vào khối regen bên dưới như bình thường.
+                }
+
+                // --- HỒI PHỤC (REGEN) — áp dụng cho MỌI trạng thái KHÔNG tiêu hao, TRỪ Climbing (đứng
+                // yên trên tường không hồi) và Floating/Idle dưới nước (trung lập tuyệt đối) — 2 ngoại
+                // lệ này đã tự "return" sớm hoặc rơi vào đây với điều kiện chặn riêng bên dưới. ---
+                const isNeutralNoRegenState = (player.isClimbing) || (player.isSwimming && player.swimState === 'idle');
+
+                if (isConsumingStamina) {
+                    // Đang tiêu hao (Sprint/Dash/Climb-di-chuyển/Climb-Jump/Swim-Stroke/Swim-Sprint/
+                    // Glide) → HỦY hồi ngay lập tức + RESET bộ đếm delay về đầy, đúng spec.
+                    player.staminaRegenDelayTimer = STAMINA_CONFIG.REGEN_DELAY_SECONDS;
+                } else if (!isNeutralNoRegenState) {
+                    // Không tiêu hao và không phải trạng thái trung lập (VD Idle/Walking/Running trên
+                    // cạn, hoặc vừa buông Sprint/Dash) → đếm ngược delay rồi hồi.
+                    if (player.staminaRegenDelayTimer > 0) {
+                        player.staminaRegenDelayTimer = Math.max(0, player.staminaRegenDelayTimer - dt);
+                    } else {
+                        player.stamina = Math.min(player.maxStamina, player.stamina + STAMINA_CONFIG.REGEN_PER_SECOND * dt);
+                        // Đã hồi được (dù chỉ 1 chút) → Stamina chắc chắn > 0, gỡ cờ hết-sức nếu còn sót
+                        // lại từ lần Swim Stroke cạn kiệt trước đó (VD người chơi đã lên bờ/hết bơi).
+                        if (player.isStaminaExhausted && player.stamina > STAMINA_CONFIG.MIN_STAMINA) {
+                            player.isStaminaExhausted = false;
+                        }
+                    }
+                }
+
+                // Gỡ cờ hết-sức ngay khi rời khỏi trạng thái Swimming hẳn (VD lên bờ) — tránh cờ này
+                // vô tình rò rỉ sang ảnh hưởng Sprint/Climb ở lần bơi tiếp theo nếu logic mở rộng sau
+                // này (Food/Talent/Passive) có đọc lại field này theo cách khác.
+                if (!player.isSwimming && player.isStaminaExhausted) {
+                    player.isStaminaExhausted = false;
+                }
             }
 
             function updateCombat(dt) {

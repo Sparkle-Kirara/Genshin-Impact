@@ -129,10 +129,11 @@
                         atk: player.stats.atk,
                         def: player.stats.def,
                         primogem: player.primogem || 0,
-                        // --- Tên nhân vật (Pre-Alpha v0.8 — UI adjustment) — nhập lần đầu qua
-                        // showPlayerNamePrompt() (ui.js) hoặc giữ mặc định 'Traveler' nếu người chơi
-                        // bấm Hủy. Lưu ở đây để applySaveData() khôi phục đúng tên đã chọn, tránh hiện
-                        // lại prompt nhập tên mỗi lần tải game (chỉ hiện đúng 1 lần lúc chưa có save).
+                        // --- Tên nhân vật (Pre-Alpha v0.8 — UI adjustment) — nhập lần đầu qua Character
+                        // Name Popup trong Opening/Title Screen (scripts/opening.js) hoặc giữ mặc định
+                        // 'Traveler' nếu người chơi bấm Hủy. Lưu ở đây để applySaveData() khôi phục
+                        // đúng tên đã chọn, tránh hiện lại popup nhập tên mỗi lần tải game (chỉ hiện
+                        // đúng 1 lần lúc chưa có save — xem runBackgroundStage() trong opening.js).
                         characterName: window.CHARACTER_DATA ? window.CHARACTER_DATA.name : 'Traveler'
                     },
                     // Map không tự serialize qua JSON.stringify (ra "{}") — chuyển thành mảng cặp
@@ -171,7 +172,12 @@
                     // gốc (10-300, nhân lại *100) để khớp trực tiếp với giá trị hiển thị trên UI slider
                     // (dễ đọc khi debug JSON, không cần quy đổi ngược khi xem).
                     settings: {
-                        cameraSensitivity: Math.round((window.cameraSensitivityMultiplier || 1.0) * 100)
+                        cameraSensitivity: Math.round((window.cameraSensitivityMultiplier || 1.0) * 100),
+                        // Skip Opening (mục 1, chuẩn bị Alpha) — người chơi bật để bỏ qua toàn bộ Opening
+                        // Flow (Logo/Title/Door Intro/Loading) ở lần khởi động TIẾP THEO, đi thẳng vào
+                        // gameplay. Mặc định false (giữ nguyên trải nghiệm Opening cho người chơi mới/
+                        // chưa từng bật). Xem runGameLaunch() (scripts/opening.js) — nơi đọc field này.
+                        skipOpening: window.skipOpeningEnabled === true
                     }
                 };
             }
@@ -318,6 +324,18 @@
                 // dùng xuyên suốt dự án.
                 if (data.settings && typeof data.settings.cameraSensitivity === 'number') {
                     window.cameraSensitivityMultiplier = data.settings.cameraSensitivity / 100;
+                }
+                // Skip Opening (mục 1, chuẩn bị Alpha) — chỉ đọc lại đúng field boolean, KHÔNG có bước
+                // chuyển đổi nào (khác cameraSensitivity phải chia 100). window.skipOpeningEnabled được
+                // opening.js ĐỌC TRỰC TIẾP ngay khi trang vừa load (runGameLaunch()) — nhưng
+                // applySaveData() chỉ chạy BÊN TRONG initThree() (SAU KHI opening.js đã quyết định xong
+                // có Skip Opening hay không cho LẦN NÀY). Dòng này vì vậy không ảnh hưởng gì tới quyết
+                // định Skip Opening của lần chạy hiện tại — chỉ đảm bảo window.skipOpeningEnabled luôn
+                // đồng bộ đúng, để lần collectSaveData() TIẾP THEO (VD người chơi vừa tắt/bật lại toggle
+                // trong Settings) không bị ghi đè nhầm bởi giá trị cũ. Xem window.onSettingsRestored
+                // (index.html) — nơi đồng bộ UI checkbox theo giá trị này.
+                if (data.settings && typeof data.settings.skipOpening === 'boolean') {
+                    window.skipOpeningEnabled = data.settings.skipOpening;
                 }
                 if (window.onSettingsRestored) window.onSettingsRestored(data.settings || {});
             }
@@ -697,6 +715,20 @@
             function deactivateGlider() {
                 player.isGliding = false;
                 if (player.gliderGroup) player.gliderGroup.visible = false;
+
+                // --- FALL DAMAGE BUGFIX (Pre-Alpha Stabilization) ---
+                // Trước đây fallStartY (đỉnh cao nhất được theo dõi — xem updatePhysics(), khối "FALL
+                // DAMAGE: theo dõi đỉnh cao nhất của chu kỳ rơi hiện tại") không phân biệt "đang rơi tự
+                // do" với "đang Gliding" — nó chỉ reset khi player.isGrounded. Hệ quả: quãng đường đã
+                // LƯỢN êm ái (Gliding chủ động giảm tốc rơi xuống velocity.y cố định -1.35, gần như
+                // không gây nguy hiểm) vẫn bị cộng dồn vào fallHeight khi hạ cánh, gây sát thương sai.
+                //
+                // Fix: NGAY khi thoát Gliding (dù do bấm Jump lần 2, hết Stamina, hay bất kỳ lý do nào
+                // khác — deactivateGlider() là điểm thoát DUY NHẤT, sửa ở đây fix được mọi trường hợp),
+                // reset fallStartY về đúng độ cao hiện tại. Điều này coi mỗi lần thoát Glide là khởi đầu
+                // 1 chu kỳ rơi MỚI — đúng quyết định đã chốt: "chỉ tính quãng đường SAU khi thoát Glide,
+                // bỏ qua cả quãng rơi trước khi vào Glide lẫn quãng đã lượn".
+                player.fallStartY = player.position.y;
             }
             window.deactivateGlider = deactivateGlider;
 
@@ -706,17 +738,26 @@
             function triggerDash() {
                 if (player.isDrowning || skillAimState.phase === 'aiming') return;
 
-                // --- STAMINA GUARD: Dash tiêu thụ thể lực ---
-                if (player.stamina < 15.0) {
-                    sfx.playBlockedSound();
-                    return; 
-                }
-
                 // Tích hợp Hành vi Swim Fast nếu đang bơi
                 if (player.isSwimming) {
+                    // --- STAMINA GUARD: bấm Dash trong lúc bơi = 1 con đường khác để vào Swim Sprint
+                    // (kết quả cuối là swimState='fast', giống hệt nhánh giữ-nút-dash trong
+                    // updatePhysics()) — dùng SWIM_SPRINT_START_COST (-2), KHÔNG dùng DASH_COST (-18),
+                    // vì đây không phải Dash trên cạn (đã chốt trong lịch sử trò chuyện).
+                    if (player.stamina < STAMINA_CONFIG.SWIM_SPRINT_START_COST) {
+                        sfx.playBlockedSound();
+                        return;
+                    }
+
+                    const wasAlreadySprinting = player.swimState === 'fast';
                     player.swimState = 'fast';
                     player.swimFastTimer = 1.2; // Thời gian burst duy trì sau khi dash
-                    player.stamina = Math.max(0, player.stamina - 15.0); // Trừ 15 thể lực khi dash bơi
+                    if (!wasAlreadySprinting) {
+                        // Chỉ trừ chi phí KHỞI ĐỘNG nếu chưa đang ở Swim Sprint — tránh trừ lặp nếu
+                        // người chơi bấm Dash liên tiếp trong lúc đã đang giữ Sprint bơi.
+                        player.stamina = Math.max(STAMINA_CONFIG.MIN_STAMINA, player.stamina - STAMINA_CONFIG.SWIM_SPRINT_START_COST);
+                    }
+                    player.swimStrokeTimer = 0.0; // đồng bộ với nhánh updateStamina() — Swim Sprint không dùng Stroke Timer
 
                     // Lực nảy nhẹ lên khi lướt (Burst out of water feel)
                     player.velocity.y = Math.max(player.velocity.y, 3.5); 
@@ -754,10 +795,16 @@
                 if (player.isGliding) return; 
                 if (player.isClimbing) return;
 
+                // --- STAMINA GUARD: Dash trên cạn tiêu DASH_COST (18.0) — không đủ thì không cho Dash. ---
+                if (player.stamina < STAMINA_CONFIG.DASH_COST) {
+                    sfx.playBlockedSound();
+                    return;
+                }
+
                 player.isDashing = true;
                 player.dashTimer = player.dashDuration;
                 player.ghostSpawnTimer = 0; 
-                player.stamina = Math.max(0, player.stamina - 15.0); // Trừ 15 thể lực khi dash trên cạn
+                player.stamina = Math.max(STAMINA_CONFIG.MIN_STAMINA, player.stamina - STAMINA_CONFIG.DASH_COST);
 
                 player.mesh.scale.set(0.68, 1.35, 0.68);
 

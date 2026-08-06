@@ -259,6 +259,71 @@
             // respawn sau khi chết (combat/drown/fall) VÀ teleport khi rơi khỏi vùng chơi hợp lệ (void).
             const PLAYER_SPAWN_POSITION = new THREE.Vector3(0, 0.9, 0);
 
+            // --- STAMINA CONFIG (Pre-Alpha Stabilization — Stamina System Rework, v0.9 → Alpha) ---
+            // Gom TOÀN BỘ thông số Stamina vào 1 nơi duy nhất — không hardcode rải rác trong
+            // updateStamina() (08-physics-combat-camera-loop.js) hay triggerDash()
+            // (06-camps-save-system.js) như bản cũ (v0.8.0). Mọi việc cân bằng lại sau này (Alpha,
+            // Beta, hoặc mở rộng qua Statue/Food/Talent/Passive — xem spec "Khả năng mở rộng") chỉ cần
+            // sửa object này, không cần lục lại logic ở nhiều file.
+            //
+            // Tên field khớp chính xác với tên biến trong spec gốc (SWIM_STROKE_INTERVAL,
+            // SWIM_STROKE_COST, SWIM_SPRINT_START_COST, SWIM_SPRINT_COST_PER_SECOND) để dễ đối chiếu
+            // ngược lại tài liệu thiết kế.
+            const STAMINA_CONFIG = window.STAMINA_CONFIG = {
+                MAX_STAMINA: 100.0,
+                MIN_STAMINA: 0.0,
+
+                // Sprint (giữ nút chạy nhanh trên cạn) — tiêu hao liên tục theo dt.
+                SPRINT_COST_PER_SECOND: 18.0,
+
+                // Dash — tiêu hao tức thời 1 lần mỗi lần thực hiện, dùng chung cho cả Dash trên cạn và
+                // Dash-khi-đang-bơi (triggerDash() trong 06-camps-save-system.js gọi chung 1 field này
+                // cho cả 2 nhánh, thay vì 2 số hardcode riêng biệt như bản cũ — 15.0 ở cả 2 chỗ).
+                DASH_COST: 18.0,
+
+                // Climbing — tiêu hao liên tục khi đang di chuyển trên tường (không di chuyển thì
+                // không trừ — xem updateStamina()).
+                CLIMB_COST_PER_SECOND: 10.0,
+                // Climb Jump — tiêu hao tức thời khi nhảy trong lúc leo. Không đủ thì chặn nhảy, không
+                // trừ âm (giống Dash: "không đủ thì không cho thực hiện").
+                CLIMB_JUMP_COST: 25.0,
+
+                // Gliding — MỚI (trước đây Glide không tiêu hao gì, xem đối chiếu ở phần trò chuyện).
+                GLIDE_COST_PER_SECOND: 3.0,
+
+                // --- SWIM STROKE TIMER (độc lập hoàn toàn với animation timer — swimOscillationTimer
+                // trong updatePhysics() chỉ phục vụ hiển thị/tilt mesh, KHÔNG được đụng vào hay dùng để
+                // tính stamina). Bơi thường: cứ mỗi SWIM_STROKE_INTERVAL giây hoàn thành 1 nhịp bơi thì
+                // trừ SWIM_STROKE_COST 1 lần — không trừ theo dt từng frame.
+                SWIM_STROKE_INTERVAL: 0.8,
+                SWIM_STROKE_COST: 4.0,
+
+                // Swim Sprint — trừ tức thời SWIM_SPRINT_START_COST khi bắt đầu (chuyển sang
+                // swimState='fast'), sau đó trừ liên tục SWIM_SPRINT_COST_PER_SECOND theo dt. Không
+                // dùng Swim Stroke Timer khi đang ở trạng thái này.
+                SWIM_SPRINT_START_COST: 2.0,
+                SWIM_SPRINT_COST_PER_SECOND: 10.2,
+
+                // --- HỒI PHỤC (Regen) ---
+                // Chỉ bắt đầu hồi sau khi KHÔNG thực hiện bất kỳ hành động tiêu hao nào (Sprint, Dash,
+                // Climb, Swim [stroke lẫn sprint], Glide) trong REGEN_DELAY_SECONDS liên tục. Sprint
+                // hoặc Dash ngay trong lúc đang đếm/đang hồi sẽ HỦY hồi và RESET lại bộ đếm — xem
+                // updateStamina() cho state machine đầy đủ theo từng trạng thái.
+                REGEN_DELAY_SECONDS: 1.5,
+                REGEN_PER_SECOND: 21.0,
+
+                // Floating/Idle dưới nước (đứng yên, không Sprint không di chuyển) — KHÔNG tiêu hao,
+                // KHÔNG hồi phục, hoàn toàn trung lập. Giữ riêng hằng số này (thay vì tái dùng
+                // REGEN_PER_SECOND = 0) để ý định rõ ràng khi đọc code.
+                SWIM_IDLE_REGEN_PER_SECOND: 0.0,
+
+                // --- UI: VÒNG TRÒN THỂ LỰC (Genshin-style Stamina Wheel) ---
+                // Giữ nguyên thiết kế UI hiện có (SVG ring + CSS transition-all duration-75 để mượt) —
+                // chỉ gom 2 ngưỡng số vốn hardcode rải rác trong khối UI của updatePhysics() vào đây.
+                UI_VISIBLE_THRESHOLD_PCT: 0.98,   // Vòng tròn chỉ hiện khi stamina/maxStamina < ngưỡng này
+                UI_LOW_WARNING_THRESHOLD_PCT: 0.22, // Dưới ngưỡng này, vòng tròn đổi màu đỏ cảnh báo
+            };
+
             const player = window.player = {
                 mesh: null,
                 width: 0.8, height: 1.8, depth: 0.8,
@@ -286,7 +351,7 @@
                 // Hệ số nhân theo LOẠI đòn đánh (multiplier trong calculateFinalDamage) — KHÔNG còn
                 // là "damage points" độc lập như trước v0.7. Final Damage thực tế của 1 đòn melee =
                 // calculateFinalDamage(player.stats.atk, enemy.stats.def, player.attack.melee).
-                attack: { melee: 1, plunge: 3, burst: 4, hydroProjectile: 1.5 },
+                attack: { melee: 1, plunge: 2, burst: 2.5, hydroProjectile: 1.5 },
                 energy: 0, maxEnergy: 50, skillHitCount: 0,
 
                 // --- EXP (v0.6 Wilderness, mục 8) — chỉ cộng dồn, CHƯA có hệ thống Level/tăng cấp.
@@ -333,9 +398,31 @@
                 recoilRemainingDist: 0,
                 recoilTimer: 0,
 
-                // --- HỆ THỐNG THỂ LỰC (v0.8.0) ---
-                stamina: 60.0, maxStamina: 60.0,
+                // --- HỆ THỐNG THỂ LỰC (Pre-Alpha Stabilization — Stamina System Rework, thay v0.8.0) ---
+                // maxStamina đổi từ 60 → 100 theo spec mới (STAMINA_CONFIG.MAX_STAMINA — xem đối chiếu
+                // với con số cũ trong lịch sử trò chuyện). Save cũ (nếu có, thang 60) KHÔNG được migrate
+                // tự động — quyết định đã chốt: pre-alpha, người chơi start new game là đủ.
+                stamina: STAMINA_CONFIG.MAX_STAMINA, maxStamina: STAMINA_CONFIG.MAX_STAMINA,
                 isDrowning: false, drownTimer: 0.0,
+
+                // swimStrokeTimer: bộ đếm ĐỘC LẬP với swimOscillationTimer (animation-only, không đụng
+                // tới) — đếm tới STAMINA_CONFIG.SWIM_STROKE_INTERVAL thì trừ SWIM_STROKE_COST 1 lần và
+                // tự reset về 0. Chỉ chạy khi đang bơi VÀ đang di chuyển VÀ không phải Swim Sprint.
+                swimStrokeTimer: 0.0,
+
+                // staminaRegenDelayTimer: đếm NGƯỢC từ STAMINA_CONFIG.REGEN_DELAY_SECONDS mỗi frame
+                // không tiêu hao gì; về 0 thì bắt đầu hồi ở REGEN_PER_SECOND. Bất kỳ hành động tiêu hao
+                // nào (đặc biệt Sprint/Dash theo spec) sẽ reset timer này về REGEN_DELAY_SECONDS ngay
+                // lập tức — xem updateStamina() trong 08-physics-combat-camera-loop.js.
+                staminaRegenDelayTimer: 0.0,
+
+                // isStaminaExhausted: cờ đánh dấu "vừa hết sạch Stamina trong lúc hoàn thành 1 Swim
+                // Stroke" — theo đúng spec Swim Stroke: "Sau khi Stroke kết thúc, không được bắt đầu
+                // Stroke tiếp theo" + "Kích hoạt trạng thái hết Stamina". Bản thân cờ này KHÔNG tự kích
+                // hoạt triggerDrowningSequence() — chỉ chặn Swim Stroke mới; cơ chế chìm/thất bại đầy đủ
+                // khi hết Stamina lúc bơi (kể cả ngoài Swim Sprint) đã có sẵn qua nhánh
+                // "player.stamina <= 0 && player.isSwimming" trong updateStamina().
+                isStaminaExhausted: false,
 
                 isBursting: false, burstSphere: null, burstDir: new THREE.Vector3(),
                 burstDistTraveled: 0, burstRotTimer: 0,
@@ -357,9 +444,9 @@
 
                 jumpRequested: false,
 
-                speed: 7.2,           
-                sprintSpeed: 14.0,    
-                walkSpeed: 3.8  ,       
+                speed: 6.2,           
+                sprintSpeed: 13.0,    
+                walkSpeed: 2.5  ,       
                 acceleration: 45.0,   
                 deceleration: 18.0,   
                 jumpForce: 12.5,      
@@ -381,7 +468,7 @@
 
                 isDashing: false, dashTimer: 0, dashCooldownTimer: 0,
                 dashDirection: new THREE.Vector3(), lastMovementDirection: new THREE.Vector3(0, 0, 1), 
-                dashSpeed: 28.0,        
+                dashSpeed: 26.0,        
                 dashDuration: 0.2,    
                 dashCooldown: 0.4,     
                 ghostSpawnTimer: 0     
@@ -401,9 +488,10 @@
             const CHARACTER_DATA = window.CHARACTER_DATA = {
                 id: 'traveler_hydro',
                 // Pre-Alpha v0.8 — UI adjustment: tên mặc định là 'Traveler' (KHÔNG hard-code tên cụ
-                // thể nữa). Tên thật được set bởi showPlayerNamePrompt() (ui.js) lúc bắt đầu hành
-                // trình mới, hoặc khôi phục từ save data (xem applySaveData() — 06-camps-save-system.js)
-                // nếu người chơi đã có tiến trình trước đó.
+                // thể nữa). Tên thật được set bởi Character Name Popup trong Opening/Title Screen
+                // (scripts/opening.js — runBackgroundStage()) lúc bắt đầu hành trình mới, hoặc khôi
+                // phục từ save data (xem applySaveData() — 06-camps-save-system.js) nếu người chơi đã
+                // có tiến trình trước đó.
                 name: 'Traveler',
                 element: 'Hydro',
                 region: 'Mondstadt', // Optional theo spec — placeholder Pre-Alpha
@@ -462,9 +550,10 @@
             window.checkLevelUp = checkLevelUp;
 
             // Đặt tên nhân vật + đồng bộ MỌI nơi hiển thị tên (Paimon Menu profile card, Character
-            // Screen) — ĐÚNG 1 đường duy nhất để đổi tên, dùng chung bởi cả showPlayerNamePrompt()
-            // (lần đầu chơi, ui.js) LẪN applySaveData() (khôi phục tên đã lưu, 06-camps-save-system.js)
-            // để không có 2 nơi tự ý cập nhật CHARACTER_DATA.name theo cách khác nhau.
+            // Screen) — ĐÚNG 1 đường duy nhất để đổi tên, dùng chung bởi cả Character Name Popup
+            // (lần đầu chơi, scripts/opening.js) LẪN applySaveData() (khôi phục tên đã lưu,
+            // 06-camps-save-system.js) để không có 2 nơi tự ý cập nhật CHARACTER_DATA.name theo cách
+            // khác nhau.
             function setCharacterName(name) {
                 const trimmed = (name || '').trim();
                 CHARACTER_DATA.name = trimmed || 'Traveler';
@@ -505,7 +594,7 @@
                     element: 'Hydro',
                     region: 'Mondstadt',
                     bodyColor: 0x475569, // Màu gốc — giữ đúng như player Pre-Alpha trước v0.8.5
-                    baseStats: { maxHp: 100, atk: 16, def: 10 }
+                    baseStats: { maxHp: 160, atk: 14, def: 10 }
                 },
                 {
                     id: 'test_character_anemo',
@@ -517,7 +606,7 @@
                     element: 'Anemo',
                     region: 'Mondstadt',
                     bodyColor: 0x16a34a,
-                    baseStats: { maxHp: 90, atk: 12, def: 8 }
+                    baseStats: { maxHp: 140, atk: 12, def: 8 }
                 },
                 null, // Reserved slot 3 — dành cho Character nhận thêm sau này (Alpha)
                 null  // Reserved slot 4
@@ -809,20 +898,20 @@
             const ELEMENTAL_SKILL_CONFIG = {
                 holdThreshold: 0.2,
                 aim: {
-                    maxDuration: 3.0,
-                    fireInterval: 0.24,
-                    cameraZoomDistance: 5.0,
-                    cameraSideOffset: 2,
+                    maxDuration: 3.5,
+                    fireInterval: 0.35,
+                    cameraZoomDistance: 6.0,
+                    cameraSideOffset: 2.0,
                     cameraOffsetLerpSpeed: 10.0
                 },
                 smallShot: {
                     speed: 15.0,
-                    damage: 0.2, // Hệ số nhân với player.attack.hydroProjectile
+                    damage: 0.4, // Hệ số nhân với player.attack.hydroProjectile
                     maxRange: 24,
                     trailChance: 0.6 // Xác suất/frame sinh hạt nước theo đường bay
                 },
                 pressureShot: {
-                    damage: 2, // Hệ số nhân với player.attack.hydroProjectile
+                    damage: 1.5, // Hệ số nhân với player.attack.hydroProjectile
                     maxRange: 32,
                     beamRadius: 0.4,
                     fadeDuration: 0.3,
