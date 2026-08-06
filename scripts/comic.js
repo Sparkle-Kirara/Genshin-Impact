@@ -356,14 +356,34 @@ COMIC_CASES[5] = { caseId, tag, tagColor, title, summary, content };
                     </p>
                 </div>
 
-                <div class="flex items-center justify-between bg-[#141224] p-3 rounded-lg border border-[#2d284f]/60 text-xs font-mono">
-                    <div>
-                        <span class="text-emerald-400 font-bold block">Pre-Alpha Complete</span>
-                        <span class="text-stone-400 text-[10px]">v0.9.5 — Ascension</span>
+                <!-- UPDATED FOOTER -->
+                <div class="bg-[#12101f] rounded-xl border border-amber-500/30 p-4 space-y-3 font-mono">
+                    <div class="flex items-center justify-between border-b border-stone-800 pb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-stone-400 uppercase tracking-widest">CASE STATUS</span>
+                        </div>
+                        <span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-2.5 py-0.5 rounded text-xs font-bold flex items-center gap-1.5">
+                            <i class="fa-solid fa-check text-[10px]"></i> CLOSED
+                        </span>
                     </div>
-                    <div class="text-right">
-                        <span class="text-amber-400 font-bold block">Next Chapter →</span>
-                        <span class="text-stone-300 text-[10px]">Alpha v1.0</span>
+
+                    <div class="grid grid-cols-2 gap-3 text-xs pt-1">
+                        <div>
+                            <span class="text-stone-500 text-[10px] block uppercase tracking-wider">Released</span>
+                            <span class="text-amber-200 font-medium">07 August 2026</span>
+                        </div>
+                        <div class="text-right">
+                            <span class="text-stone-500 text-[10px] block uppercase tracking-wider">Milestone</span>
+                            <span class="text-emerald-300 font-bold">Pre-Alpha Complete</span>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between bg-black/40 p-2.5 rounded-lg border border-amber-900/20 text-xs mt-1">
+                        <span class="text-stone-400 font-serif italic">v0.9.5 — Ascension</span>
+                        <div class="flex items-center gap-1.5 text-amber-400 font-bold">
+                            <span>Next Chapter</span>
+                            <span class="text-emerald-400">→ Alpha v1.0</span>
+                        </div>
                     </div>
                 </div>
             </div>
