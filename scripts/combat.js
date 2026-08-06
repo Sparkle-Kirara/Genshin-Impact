@@ -110,7 +110,7 @@
                 if (!player.isGrounded) {
                     if (!player.isPlunging) {
                         const heightAboveGround = player.position.y - (player.height / 2) - getGroundYForPosition(player.position);
-                        if (heightAboveGround > 2.1) {
+                        if (heightAboveGround > 2.6) {
                             triggerPlungeAttack();
                         }
                     }
@@ -181,7 +181,24 @@
                     // theo góc đó (giống hệt cách triggerAttack() áp dụng cho đòn đánh thường).
                     sfx.playSwing();
 
-                    const softTarget = findSoftTargetingRotation(player.position, player.mesh.rotation.y);
+                    // BUGFIX (Pre-Alpha Stabilization — Soft Target khi đang di chuyển): dùng góc từ
+                    // HƯỚNG CAMERA thay vì player.mesh.rotation.y làm tâm "hình nón phía trước" của Soft
+                    // Targeting. rotation.y được lerp mượt dần theo hướng di chuyển (xem updatePhysics(),
+                    // khối "HỆ THỐNG PROCEDURAL ANIMATION") nên tại đúng thời điểm bấm skill trong lúc
+                    // đang di chuyển, nó là 1 giá trị TRUNG GIAN đang "đuổi theo" hướng joystick/AWSD với
+                    // độ trễ — không phản ánh đúng hướng người chơi thực sự muốn ngắm tới. Hệ quả cũ: địch
+                    // ở tier 2/3 (giới hạn góc ±120°/±72°) dễ bị tính lệch ra ngoài "hình nón" và bị loại
+                    // sai, khiến findSoftTargetingRotation() trả về null, hàm gọi fallback về hướng di
+                    // chuyển (đúng triệu chứng bug đã xác nhận). Hướng camera là giá trị TỨC THỜI, ổn
+                    // định, không bị trễ animation — quyết định đã chốt: dùng camera, KHÔNG dùng
+                    // inputVelocity, đồng bộ với cách Aim Mode xác định hướng ngắm.
+                    const camForwardForSoftTarget = new THREE.Vector3();
+                    camera.getWorldDirection(camForwardForSoftTarget);
+                    const softTargetFacingAngle = (camForwardForSoftTarget.x === 0 && camForwardForSoftTarget.z === 0)
+                        ? player.mesh.rotation.y // Camera nhìn thẳng đứng (hiếm, XZ suy biến) — fallback an toàn
+                        : Math.atan2(camForwardForSoftTarget.x, camForwardForSoftTarget.z);
+
+                    const softTarget = findSoftTargetingRotation(player.position, softTargetFacingAngle);
                     let shotDir = null;
                     if (softTarget) {
                         player.softTargetLockY = softTarget.targetY;
@@ -233,22 +250,46 @@
                     return;
                 }
 
-                // --- AIM 3D: aimDir là hướng camera ĐẦY ĐỦ 3 TRỤC (X/Y/Z) — dùng làm hướng bắn cho tia
-                // nhỏ, để người chơi ngắm lên cao/xuống thấp đều bắn trúng đúng hướng crosshair. facingDir
-                // (chỉ XZ, Y=0) TÁCH RIÊNG chỉ dùng để xoay hình ảnh nhân vật (rotation.y) — nhân vật
-                // không nên "cúi gập" theo trục dọc dù đang ngắm lên/xuống.
+                // --- AIM 3D: aimDir là hướng CAMERA thô (3 trục X/Y/Z) — vẫn cần giữ lại làm fallback
+                // (facing gần thẳng đứng) và làm gốc tính provisionalSpawn bên dưới, y hệt trước đây.
                 const aimDir = new THREE.Vector3();
                 camera.getWorldDirection(aimDir);
                 if (aimDir.lengthSq() < 0.0001) aimDir.set(Math.sin(player.mesh.rotation.y), 0, Math.cos(player.mesh.rotation.y));
                 aimDir.normalize();
 
-                const facingDir = new THREE.Vector3(aimDir.x, 0, aimDir.z);
+                // --- HƯỚNG XOAY NHÂN VẬT: TRƯỚC ĐÂY xoay theo aimDir (hướng camera thô) — nhưng đạn
+                // THẬT SỰ bay theo correctedDir (từ vị trí spawn trên người nhân vật TỚI điểm crosshair
+                // raycast trúng, xem nhánh bắn phía dưới), 2 hướng này KHÔNG song song (origin đạn ở
+                // thân player, camera ở xa phía sau/trên — bug đã note ở nhánh bắn). Điều chỉnh: raycast
+                // MỖI FRAME (không chỉ lúc fireTimer <= 0) để lấy đúng điểm ngắm hiện tại, tính lại
+                // correctedDir kiểu tương tự, rồi xoay nhân vật theo correctedDir đó — để hình ảnh nhân
+                // vật khớp ĐÚNG hướng skill sắp/đang phóng ra, không phải hướng camera.
+                const provisionalSpawnForFacing = player.position.clone().addScaledVector(aimDir, 0.9);
+                const crosshairAimResult = raycastFromCrosshair();
+                const facingShotDir = crosshairAimResult.point.clone().sub(provisionalSpawnForFacing);
+                if (facingShotDir.lengthSq() > 0.0001) facingShotDir.normalize(); else facingShotDir.copy(aimDir);
+
+                const facingDir = new THREE.Vector3(facingShotDir.x, 0, facingShotDir.z);
                 if (facingDir.lengthSq() > 0.0001) {
                     facingDir.normalize();
                     player.mesh.rotation.y = Math.atan2(facingDir.x, facingDir.z);
+
+                    // BUGFIX (Pre-Alpha Stabilization — Dash hướng sai sau Aim Mode): đồng bộ
+                    // lastMovementDirection theo ĐÚNG hướng player.mesh vừa xoay tới (nay là hướng skill
+                    // phóng ra, không còn là hướng camera thô) trong Aim Mode. Trước đây, input di
+                    // chuyển bị khóa hoàn toàn trong lúc Aim (xem startSkillAim(): velocity.x/z = 0) nên
+                    // lastMovementDirection KHÔNG được cập nhật ở khối input-movement thường
+                    // (updatePhysics(), chỉ chạy khi có hasMovementInput) — nó bị "đóng băng" ở hướng di
+                    // chuyển CUỐI CÙNG trước khi vào Aim. Hệ quả: nếu người chơi thoát Aim rồi Dash ngay
+                    // mà không giữ AWSD/joystick, triggerDash() (06-camps-save-system.js) rơi vào nhánh
+                    // fallback dùng lastMovementDirection cũ đó — bắn SAI hướng, lệch với hướng nhân vật
+                    // vừa xoay tới lúc Aim. Cập nhật ở đây mỗi frame trong Aim Mode để
+                    // lastMovementDirection luôn phản ánh đúng hướng player.mesh hiện tại.
+                    player.lastMovementDirection.copy(facingDir);
                 }
-                // Nếu facingDir gần (0,0,0) (camera nhìn gần như thẳng đứng), giữ nguyên rotation.y hiện
-                // tại của nhân vật — không cần fallback gán lại vì không dùng facingDir cho việc gì khác.
+                // Nếu facingDir gần (0,0,0) (điểm ngắm gần như thẳng trên/dưới vị trí spawn), giữ nguyên
+                // rotation.y hiện tại của nhân vật — không cần fallback gán lại vì không dùng facingDir
+                // cho việc gì khác.
 
                 // Lerp cameraOffsetT tăng dần về 1 (full aim camera: zoom + lệch) — mượt mà thay vì snap.
                 skillAimState.cameraOffsetT = Math.min(1, skillAimState.cameraOffsetT + (1 - Math.exp(-ELEMENTAL_SKILL_CONFIG.aim.cameraOffsetLerpSpeed * dt)));
@@ -258,7 +299,11 @@
 
                 if (skillAimState.fireTimer <= 0) {
                     skillAimState.fireTimer = ELEMENTAL_SKILL_CONFIG.aim.fireInterval;
-                    fireHydroProjectile(aimDir);
+                    // --- CROSSHAIR ALIGNMENT: dùng LẠI facingShotDir đã raycast ở trên (khối xoay nhân
+                    // vật, chạy mỗi frame) thay vì raycast lại lần nữa ở đây — vừa tránh raycast trùng
+                    // trong cùng 1 frame, vừa đảm bảo hướng đạn bắn ra LUÔN khớp tuyệt đối với hướng
+                    // player.mesh đang xoay tới (yêu cầu: nhân vật quay theo đúng hướng skill phóng ra).
+                    fireHydroProjectile(facingShotDir);
                 }
 
                 // Trần thời gian tối đa: tự động kết thúc dù người chơi vẫn đang giữ phím.
@@ -279,7 +324,16 @@
                 if (camForward.lengthSq() < 0.0001) camForward.set(Math.sin(player.mesh.rotation.y), 0, Math.cos(player.mesh.rotation.y));
                 camForward.normalize();
 
-                fireHydroBeam(camForward);
+                // --- CROSSHAIR ALIGNMENT: cùng kỹ thuật như updateSkillAim() — raycast từ camera lấy
+                // điểm đích thật, rồi tính lại hướng bắn từ điểm SPAWN (không đổi vị trí spawn) tới đúng
+                // điểm đó, thay vì bắn song song hướng camera (nguồn gốc bug lệch Crosshair đã xác định
+                // trong lịch sử trò chuyện — origin ở thân player, camera thật ở xa phía sau/trên).
+                const aimResult = raycastFromCrosshair();
+                const provisionalOrigin = player.position.clone().addScaledVector(camForward, 0.9);
+                const correctedForward = aimResult.point.clone().sub(provisionalOrigin);
+                if (correctedForward.lengthSq() > 0.0001) correctedForward.normalize(); else correctedForward.copy(camForward);
+
+                fireHydroBeam(correctedForward);
 
                 skillAimState.phase = 'idle';
                 skillAimState.aimTimer = 0;
@@ -434,6 +488,137 @@
                 return tmin;
             }
 
+            // --- AIM MODE & CROSSHAIR ALIGNMENT (Pre-Alpha Stabilization) ---
+            // raycastFromCrosshair(): bắn 1 tia THẬT từ VỊ TRÍ CAMERA (không phải player.position) theo
+            // đúng hướng camera đang nhìn — đây chính là "đường ngắm" mà Crosshair (chấm giữa màn hình)
+            // đại diện.
+            //
+            // BUGFIX (mở rộng phạm vi raycast): TRƯỚC ĐÂY chỉ quét thủ công 2 mảng cố định — obstacles
+            // (AABB va chạm) và enemies (bán kính ước lượng hình cầu) — nên KHÔNG bắt được bất kỳ mesh
+            // nào khác không nằm trong 2 mảng đó (mặt đất/ground, cây/đá trang trí từ
+            // createEnvironmentProps(), signpost, hàng rào spawn...), vì các mesh này chỉ scene.add()
+            // thẳng, không có AABB va chạm đăng ký riêng. Thay bằng THREE.Raycaster THẬT, quét trực tiếp
+            // scene.children (recursive) — tự động bắt được MỌI mesh có geometry thật đang tồn tại
+            // trong scene, không cần đăng ký thủ công từng loại object vào từng mảng riêng như trước.
+            //
+            // Loại trừ khỏi kết quả raycast (những thứ KHÔNG nên chặn đường ngắm của chính người chơi):
+            //   - player.mesh và toàn bộ mesh con của nó (không thể tự chặn tia ngắm của chính mình).
+            //   - THREE.InstancedMesh (cỏ — grassMesh) — phủ dày đặc khắp map, nếu để chặn tia thì
+            //     crosshair sẽ luôn dừng lại ở khoảng cách rất gần bất cứ đâu có cỏ, phá hỏng hoàn toàn
+            //     khả năng ngắm xa. Cỏ thuần tuý là chi tiết hình ảnh, không có ý nghĩa va chạm — loại
+            //     TRƯỚC khi gọi intersectObjects() (không phải lọc kết quả sau) để tránh lãng phí raycast
+            //     lên hàng nghìn instance mỗi frame trong lúc Aim (xem raycastFromCrosshair() bên dưới).
+            //   - Mesh thuộc hiệu ứng tạm thời của CHÍNH Elemental Skill (activeProjectiles đã bắn ra,
+            //     activeHydroBeamVisuals) — tránh trường hợp viên đạn/tia nước vừa bắn ra trước đó (còn
+            //     đang bay/còn hiệu ứng fade) lại tự chặn đường ngắm của phát bắn tiếp theo.
+            //   - THREE.Sprite (thanh máu enemy...) — luôn xoay mặt về camera, là lớp UI overlay chứ
+            //     không phải hình khối thật của thế giới. Cần crosshairRaycaster.camera (set 1 lần bên
+            //     dưới) để Three.js không throw lỗi khi raycast chạm phải Sprite.
+            //
+            // Trả về { point: THREE.Vector3, distance: number, hitEnemy: Enemy | null }:
+            //   - Trúng vật gì đó: point = điểm va chạm gần nhất trên toàn bộ tia.
+            //   - Không trúng gì: point = điểm ảo cách camera 700m theo hướng nhìn (nằm giữa khoảng
+            //     500-1000m theo spec) — đủ xa để coi như "vô cực" nhưng vẫn là số hữu hạn, tránh NaN/
+            //     Infinity lan sang các phép tính hướng bay phía sau.
+            //   - hitEnemy: tham chiếu Enemy nếu mesh trúng gần nhất thuộc về đúng 1 enemy còn sống (dò
+            //     ngược từ mesh bị trúng lên tới enemy.mesh gần nhất trong chuỗi cha — enemy.mesh là 1
+            //     THREE.Group nên tia có thể trúng bất kỳ mesh con nào bên trong nó, không chỉ chính nó).
+            const CROSSHAIR_RAYCAST_MAX_DISTANCE = 700;
+            const crosshairRaycaster = new THREE.Raycaster();
+            crosshairRaycaster.far = CROSSHAIR_RAYCAST_MAX_DISTANCE;
+            // BUGFIX: scene chứa THREE.Sprite (hpBarBg/hpBarFill, con của enemy.mesh — xem enemies.js)
+            // — Three.js BẮT BUỘC raycaster.camera phải được set trước khi raycast trúng bất kỳ Sprite
+            // nào (sprite luôn xoay mặt về camera nên cần biết camera để tính đúng mặt phẳng của nó),
+            // nếu không sẽ throw "Raycaster.camera needs to be set" thay vì bỏ qua êm.
+            //
+            // BUGFIX #2 (lỗi tái diễn lúc bấm Elemental Skill lần đầu): KHÔNG được gán
+            // crosshairRaycaster.camera = camera Ở ĐÂY (top-level, chạy ngay lúc combat.js được load).
+            // Biến `camera` chỉ THỰC SỰ được gán new THREE.PerspectiveCamera(...) bên trong initThree()
+            // (04-scene-init.js) — hàm này chỉ chạy SAU KHI người chơi bấm Start ở Opening/Title Screen
+            // (window.startGameplay()), KHÔNG chạy ngay lúc script load. Tại thời điểm dòng top-level
+            // này từng chạy trước đây, `camera` vẫn còn undefined (đã khai báo nhưng chưa gán) —
+            // crosshairRaycaster.camera bị gán undefined vĩnh viễn (KHÔNG BAO GIỜ được gán lại sau đó),
+            // nên raycast trúng Sprite vẫn throw lỗi y hệt dù `camera` thật đã tồn tại từ lâu vào lúc đó.
+            // Sửa: gán lại crosshairRaycaster.camera = camera MỖI LẦN raycastFromCrosshair() chạy (xem
+            // bên trong hàm) — cùng cách camOrigin/camDir cũng đọc `camera` bên trong hàm, không phải
+            // top-level.
+
+            // Dò object bị trúng có thuộc về 1 Enemy còn sống hay không — leo ngược lên cây cha (mesh
+            // trúng có thể là 1 sub-mesh nằm sâu bên trong enemy.mesh, VD phần thân/mắt riêng biệt).
+            function findOwningEnemy(hitObject) {
+                for (let i = 0; i < enemies.length; i++) {
+                    const enemy = enemies[i];
+                    if (!enemy.alive || !enemy.mesh) continue;
+                    let node = hitObject;
+                    while (node) {
+                        if (node === enemy.mesh) return enemy;
+                        node = node.parent;
+                    }
+                }
+                return null;
+            }
+
+            function raycastFromCrosshair() {
+                const camOrigin = new THREE.Vector3();
+                camera.getWorldPosition(camOrigin);
+                const camDir = new THREE.Vector3();
+                camera.getWorldDirection(camDir);
+                if (camDir.lengthSq() < 0.0001) camDir.set(Math.sin(player.mesh.rotation.y), 0, Math.cos(player.mesh.rotation.y));
+                camDir.normalize();
+
+                // Gán LẠI mỗi lần gọi (xem BUGFIX #2 ở khai báo crosshairRaycaster phía trên) — đảm bảo
+                // luôn dùng đúng camera THẬT đã được initThree() khởi tạo, không phải giá trị undefined
+                // còn sót lại từ lúc combat.js mới load script (trước khi initThree() từng chạy).
+                crosshairRaycaster.camera = camera;
+                crosshairRaycaster.set(camOrigin, camDir);
+                // Lọc BỎ InstancedMesh (cỏ) TRƯỚC KHI gọi intersectObjects() — không phải sau khi có kết
+                // quả. Three.js raycast lên InstancedMesh phải tự kiểm tra TỪNG instance riêng lẻ (cỏ có
+                // thể lên tới hàng nghìn instance, xem createGrassBlades()), nên nếu lọc SAU (như bản
+                // đầu tiên) vẫn tốn chi phí tính toán ray-instance cho toàn bộ cỏ mỗi frame trong lúc
+                // Aim dù kết quả bị vứt bỏ ngay sau đó. Lọc TRƯỚC giúp Three.js không bao giờ phải chạm
+                // tới InstancedMesh này trong quá trình raycast.
+                const raycastTargets = scene.children.filter(obj => !obj.isInstancedMesh);
+                const hits = crosshairRaycaster.intersectObjects(raycastTargets, true);
+
+                let closestDist = CROSSHAIR_RAYCAST_MAX_DISTANCE;
+                let hitEnemy = null;
+
+                for (let i = 0; i < hits.length; i++) {
+                    const hit = hits[i];
+                    if (hit.distance >= closestDist) break; // hits[] đã sắp xếp tăng dần theo distance
+
+                    // Loại trừ player.mesh (và mesh con của nó) — không thể tự chặn tia ngắm của mình.
+                    let isPlayerMesh = false;
+                    let node = hit.object;
+                    while (node) {
+                        if (node === player.mesh) { isPlayerMesh = true; break; }
+                        node = node.parent;
+                    }
+                    if (isPlayerMesh) continue;
+
+                    // Loại trừ TOÀN BỘ THREE.Sprite (VD hpBarBg/hpBarFill của enemy, xem enemies.js) —
+                    // sprite trong game này luôn là lớp UI overlay (thanh máu luôn xoay mặt về camera),
+                    // không phải hình khối THẬT của thế giới, nên không có ý nghĩa chặn đường ngắm.
+                    // Không liệt kê tên cụ thể từng sprite để không bị lệch nếu sau này thêm loại sprite
+                    // khác (VD damage number) — mọi Sprite đều bị loại như nhau.
+                    if (hit.object.isSprite) continue;
+
+                    // Loại trừ hiệu ứng tạm thời của chính Elemental Skill (đạn/tia nước đang bay/fade).
+                    // Cả projMesh (activeProjectiles) và beamMesh (activeHydroBeamVisuals) đều là
+                    // THREE.Mesh đơn giản không có mesh con, nên so khớp trực tiếp là đủ.
+                    const isOwnSkillEffect =
+                        activeProjectiles.some(p => p.mesh === hit.object) ||
+                        activeHydroBeamVisuals.some(b => b.mesh === hit.object);
+                    if (isOwnSkillEffect) continue;
+
+                    closestDist = hit.distance;
+                    hitEnemy = findOwningEnemy(hit.object);
+                }
+
+                const point = camOrigin.clone().addScaledVector(camDir, closestDist);
+                return { point, distance: closestDist, hitEnemy };
+            }
+
             // Hiệu ứng hình ảnh cho Pressure Shot: 1 hình trụ mảnh từ origin kéo dài `length` mét (tính
             // theo khoảng cách raycast thực tế của fireHydroBeam), fade rất nhanh (fadeDuration) rồi tự
             // hủy — KHÔNG di chuyển, không bay, chỉ xuất hiện rồi biến mất gần như ngay lập tức để mô
@@ -517,7 +702,17 @@
             function handleBurstKeyDown() {
                 if (!canUseBurst()) return;
 
-                const softTarget = findSoftTargetingRotation(player.position, player.mesh.rotation.y);
+                // BUGFIX (Pre-Alpha Stabilization — Soft Target khi đang di chuyển): cùng lý do và cách
+                // sửa như handleSkillKeyUp() — xem comment đầy đủ ở đó. Tóm tắt: dùng hướng CAMERA làm
+                // tâm "hình nón phía trước" của Soft Targeting thay vì player.mesh.rotation.y (bị trễ do
+                // đang lerp theo hướng di chuyển), để không loại nhầm địch ở tier 2/3 khi đang di chuyển.
+                const camForwardForSoftTarget = new THREE.Vector3();
+                camera.getWorldDirection(camForwardForSoftTarget);
+                const softTargetFacingAngle = (camForwardForSoftTarget.x === 0 && camForwardForSoftTarget.z === 0)
+                    ? player.mesh.rotation.y
+                    : Math.atan2(camForwardForSoftTarget.x, camForwardForSoftTarget.z);
+
+                const softTarget = findSoftTargetingRotation(player.position, softTargetFacingAngle);
                 let dir;
                 if (softTarget) {
                     player.softTargetLockY = softTarget.targetY;

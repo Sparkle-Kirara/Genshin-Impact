@@ -37,7 +37,7 @@
                     // mức tối thiểu chỉ để không lỗi nếu lỡ có code khác gọi calculateFinalDamage()
                     // với enemy loại này. hp/maxHp đọc/ghi xuyên qua get/set (khai báo ở class body,
                     // xem bên dưới constructor) vào đúng this.stats.hp/maxHp.
-                    this.stats = { maxHp: 999999, hp: 999999, atk: 15, def: 0 };
+                    this.stats = { maxHp: 999999, hp: 999999, atk: 0, def: 0 };
                     this.alive = true; this.respawnTimer = 0; this.flashTimer = 0;
                     this.knockback = new THREE.Vector3();
                     this.idleTimer = Math.random() * 100;
@@ -172,29 +172,90 @@
             }
             window.Enemy = Enemy;
 
+            // --- SLIME WANDER CONFIG (Pre-Alpha Stabilization) ---
+            // Gom range random cho các timer trạng thái lang thang (idle/prep/land) của Slime — trước
+            // đây chỉ có Idle stateTimer được random hoá lúc constructor (Math.random() * 2.0), các
+            // vòng lặp sau đó và toàn bộ prep/land đều dùng số cố định (1.2s / 0.15s / 0.12s), khiến
+            // nhịp lang thang đều đặn dễ đoán sau vài chu kỳ đầu. Không áp dụng cho các timer liên quan
+            // player (chase/attack_prep/attack_land) — phạm vi yêu cầu chỉ là hành vi lang thang thuần
+            // tuý, không đụng gì tới AI chiến đấu.
+            //   idleDuration: khoảng thời gian đứng yên trôi nhẹ trước khi đổi hướng/nhảy tiếp.
+            //   prepDuration: khoảng "gồng mình" rất ngắn trước khi nhảy.
+            //   landDuration: khoảng nghỉ rất ngắn sau khi tiếp đất, trước khi quay lại idle.
+            // speed/jumpPowerY KHÔNG random — quyết định đã chốt, giữ cố định để không ảnh hưởng cảm
+            // giác nhảy đã cân bằng, chỉ random thời gian chờ và hướng đi.
+            const SLIME_WANDER_CONFIG = {
+                idleDuration: { min: 10.0, max: 30.0 },
+                prepDuration: { min: 0.10, max: 0.20 },
+                landDuration: { min: 0.08, max: 0.18 },
+                // --- BEHAVIOR MODE (đứng yên vs trườn khi idle) ---
+                // KHÔNG gắn với vòng đời idle→prep→jump→land của state machine chính — đây là 1 timer
+                // ĐỘC LẬP, tick mỗi frame bất kể slime đang ở state nào (xem updateBehaviorMode() bên
+                // dưới, gọi ở ĐẦU update() trước khi vào state machine). Cứ hết behaviorModeDuration
+                // giây thì "tung xúc xắc" lại xem slime bước vào "chế độ hành vi" nào — chế độ đó áp
+                // dụng cho MỌI lần idle xảy ra trong suốt khoảng thời gian này, dù slime có nhảy qua
+                // nhiều vòng idle→prep→jump→land khác nhau trong lúc đó. Quyết định đã chốt: không phải
+                // "random 1 lần mỗi khi vào idle" (thiết kế cũ) mà là "1 tính cách tạm thời kéo dài vài
+                // giây, xuyên suốt nhiều lần idle".
+                behaviorModeDuration: { min: 2.0, max: 8.0 },
+                stationaryChance: 0.25, // Xác suất chế độ hiện tại là "đứng yên hoàn toàn" (còn lại: trườn nhẹ như mặc định)
+            };
+            window.SLIME_WANDER_CONFIG = SLIME_WANDER_CONFIG;
+
+            // Random đều đơn giản trong [range.min, range.max] — quyết định đã chốt, không dùng kỹ
+            // thuật trung bình nhiều lần (gần phân phối chuẩn) để giữ code gọn, dễ đọc.
+            function randomInRange(range) {
+                return range.min + Math.random() * (range.max - range.min);
+            }
+
+            // updateBehaviorMode(slime, dt): tick timer BEHAVIOR MODE độc lập — xem comment đầy đủ ở
+            // SLIME_WANDER_CONFIG.behaviorModeDuration phía trên. Gọi ở ĐẦU update() (trước state
+            // machine), KHÔNG đặt trong nhánh 'idle' — vì hành vi phải tiếp tục đếm/random ngay cả khi
+            // slime đang jump/chase/land, để khi nó QUAY LẠI idle thì chế độ đã sẵn sàng đúng lúc, không
+            // bị "trễ nhịp" so với đồng hồ thực.
+            function updateBehaviorMode(slime, dt) {
+                slime.behaviorModeTimer -= dt;
+                if (slime.behaviorModeTimer <= 0) {
+                    slime.behaviorModeTimer = randomInRange(SLIME_WANDER_CONFIG.behaviorModeDuration);
+                    slime.isIdleStationary = Math.random() < SLIME_WANDER_CONFIG.stationaryChance;
+                }
+            }
+
+            // enterIdleState(slime): chuyển 1 slime sang state 'idle' — CHỈ còn phụ trách stateTimer
+            // (thời lượng lần idle này) và state machine, KHÔNG còn tự quyết định isIdleStationary nữa
+            // (đã tách sang updateBehaviorMode() độc lập, xem trên). Gói chung logic đổi state này thay
+            // vì lặp lại ở 4 điểm chuyển sang idle rải rác trong update() (constructor, rời chase do mất
+            // dấu địch, land xong không còn trong tầm, Void reset), để đổi công thức stateTimer sau này
+            // chỉ cần sửa 1 chỗ. isEngagingPlayer do NGƯỜI GỌI tự set sau khi gọi hàm này — không gộp
+            // vào đây vì không phải mọi lần đều muốn ghi đè giá trị đó.
+            function enterIdleState(slime) {
+                slime.state = 'idle';
+                slime.stateTimer = randomInRange(SLIME_WANDER_CONFIG.idleDuration);
+            }
+
             class Slime {
                 constructor(x, z, isLarge = false) {
                     this.id = window.nextEnemyId++; this.isSlime = true;
                     if (isLarge) {
                         this.isLarge = true; this.width = 2.8; this.height = 2.0; this.depth = 2.8;
-                        this.speed = 2.0; this.chaseSpeed = 4.2;
+                        this.speed = 2.0; this.chaseSpeed = 4.4;
                         this.detectRadius = 15.0; this.loseRadius = 30.0; this.chaseCooldown = 0.6; this.jumpPowerY = 9.0;
                         // --- CORE STATS (v0.7) — số liệu Large Slime theo core_stats.md mục 7.
-                        this.stats = { maxHp: 320, hp: 320, atk: 20, def: 12 };
+                        this.stats = { maxHp: 300, hp: 300, atk: 20, def: 14 };
                         this.expReward = 30; // dùng bởi onSlimeKilled() (game.js) khi tính EXP rơi ra
-                        this.attackRange = 2.0; // khoảng cách để bắt đầu chuẩn bị tấn công
-                        this.attackTelegraphDuration = 0.5; // giây chuẩn bị trước khi lao vào
-                        this.attackHitRange = 2.3; // khoảng cách tối đa để đòn đánh trúng
+                        this.attackRange = 2.1; // khoảng cách để bắt đầu chuẩn bị tấn công
+                        this.attackTelegraphDuration = 0.45; // giây chuẩn bị trước khi lao vào
+                        this.attackHitRange = 2.5; // khoảng cách tối đa để đòn đánh trúng
                     } else {
                         this.isLarge = false; this.width = 1.6; this.height = 0.8; this.depth = 1.6;
-                        this.speed = 3.5; this.chaseSpeed = 7.0; 
+                        this.speed = 3.5; this.chaseSpeed = 7.2; 
                         this.detectRadius = 15.0; this.loseRadius = 30.0; this.chaseCooldown = 0.35; this.jumpPowerY = 7.2;
                         // --- CORE STATS (v0.7) — số liệu Small Slime theo core_stats.md mục 7.
-                        this.stats = { maxHp: 150, hp: 150, atk: 12, def: 5 };
+                        this.stats = { maxHp: 120, hp: 120, atk: 14, def: 8 };
                         this.expReward = 10;
-                        this.attackRange = 1.6;
-                        this.attackTelegraphDuration = 0.4;
-                        this.attackHitRange = 1.8;
+                        this.attackRange = 1.7;
+                        this.attackTelegraphDuration = 0.3;
+                        this.attackHitRange = 2.1;
                     }
                     this.attackTargetPos = new THREE.Vector3(); // vị trí player được "khóa" lúc bắt đầu chuẩn bị
                     this.player_hasBeenHitThisAttack = false; // tránh gây damage nhiều lần trong 1 lần lao
@@ -206,7 +267,14 @@
                     // --- ENEMY HP BAR (v0.7) — hiện khi vừa bị đánh HOẶC player ở gần, ẩn sau khoảng
                     // lặng không có gì xảy ra (xem update()). Đếm NGƯỢC về 0 = còn hiện, <=0 = ẩn.
                     this.hpBarVisibleTimer = 0;
-                    this.state = 'idle'; this.stateTimer = Math.random() * 2.0; this.wanderAngle = Math.random() * Math.PI * 2;
+                    // Behavior Mode (đứng yên vs trườn khi idle) — random NGAY TỪ ĐẦU, không đợi
+                    // updateBehaviorMode() lần đầu mới random, để nhiều slime spawn cùng lúc (VD đầu
+                    // game) không bị "lệch pha" giống hệt nhau — mỗi con có đồng hồ behavior riêng ngay
+                    // từ khi sinh ra, tránh cảm giác cả đàn cùng đứng yên/cùng trườn đồng loạt.
+                    this.behaviorModeTimer = randomInRange(SLIME_WANDER_CONFIG.behaviorModeDuration);
+                    this.isIdleStationary = Math.random() < SLIME_WANDER_CONFIG.stationaryChance;
+                    enterIdleState(this);
+                    this.wanderAngle = Math.random() * Math.PI * 2;
                     this.idleBobTimer = Math.random() * 50; this.jumpVelocity = new THREE.Vector3(); this.jumpVelocityY = 0;
                     this.isGrounded = true;
                     // isAlerted: true khi slime đã bị player gây sát thương (xem takeDamage).
@@ -419,6 +487,11 @@
                         if (this.flashTimer <= 0) this.bodyMesh.material = this.defaultMaterial;
                     }
 
+                    // Behavior Mode (đứng yên vs trườn khi idle) — tick ở ĐÂY, TRƯỚC state machine,
+                    // độc lập hoàn toàn với state hiện tại (idle/jump/chase/...). Xem comment đầy đủ ở
+                    // SLIME_WANDER_CONFIG.behaviorModeDuration và updateBehaviorMode() phía trên class.
+                    updateBehaviorMode(this, dt);
+
                     // Player đã vào Dead state (biến mất khỏi scene) — không còn là mục tiêu để
                     // phát hiện/tấn công MỚI. Animation/vật lý đang dở (rơi, land...) vẫn chạy
                     // tiếp bình thường để tránh treo slime giữa không trung.
@@ -478,10 +551,22 @@
                         }
 
                         if (this.state === 'idle') {
-                            const dir = new THREE.Vector3(Math.sin(this.wanderAngle), 0, Math.cos(this.wanderAngle));
-                            this.position.addScaledVector(dir, this.speed * 0.25 * dt);
-                            const rotationLerp = 1 - Math.exp(-6 * dt);
-                            this.mesh.rotation.y += (this.wanderAngle - this.mesh.rotation.y) * rotationLerp;
+                            // Chức năng "đứng yên hoàn toàn khi idle" (Pre-Alpha Stabilization — Behavior
+                            // Mode): mặc định (isIdleStationary = false, 70% trường hợp — xem
+                            // SLIME_WANDER_CONFIG.stationaryChance) trườn nhẹ + xoay mặt theo wanderAngle
+                            // như hành vi gốc. Khi true (30%): đứng ứ im hoàn toàn — không đổi position,
+                            // không xoay rotation.y — CHỈ còn hiệu ứng bob thở (chạy vô điều kiện bên
+                            // dưới cho cả 2 trường hợp, vì đây không phải "di chuyển" mà chỉ là animation
+                            // tại chỗ). isIdleStationary do updateBehaviorMode() quyết định — 1 timer
+                            // ĐỘC LẬP (3-6s ngẫu nhiên) chạy song song với state machine, KHÔNG phải mỗi
+                            // lần vào idle mới random lại — nên chế độ này giữ nguyên xuyên suốt NHIỀU
+                            // lần idle liên tiếp cho tới khi behaviorModeTimer hết hạn.
+                            if (!this.isIdleStationary) {
+                                const dir = new THREE.Vector3(Math.sin(this.wanderAngle), 0, Math.cos(this.wanderAngle));
+                                this.position.addScaledVector(dir, this.speed * 0.25 * dt);
+                                const rotationLerp = 1 - Math.exp(-6 * dt);
+                                this.mesh.rotation.y += (this.wanderAngle - this.mesh.rotation.y) * rotationLerp;
+                            }
                             this.idleBobTimer += dt * 5.0;
                             const bobFactor = Math.sin(this.idleBobTimer) * 0.05;
                             this.bodyMesh.scale.y = 0.7 + bobFactor; this.bodyMesh.scale.x = 1.0 - bobFactor * 0.5; this.bodyMesh.scale.z = 1.0 - bobFactor * 0.5;
@@ -489,7 +574,7 @@
                             if (playerDetected) { this.state = 'prep'; this.stateTimer = 0.15; this.isEngagingPlayer = true; } 
                             else {
                                 this.stateTimer -= dt;
-                                if (this.stateTimer <= 0) { this.state = 'prep'; this.stateTimer = 0.15; this.wanderAngle += (Math.random() - 0.5) * 2; }
+                                if (this.stateTimer <= 0) { this.state = 'prep'; this.stateTimer = randomInRange(SLIME_WANDER_CONFIG.prepDuration); this.wanderAngle += (Math.random() - 0.5) * 2; }
                             }
                         } 
                         else if (this.state === 'chase') {
@@ -497,7 +582,7 @@
                             // đúng trong detectRadius mới được tiếp tục — không có vùng khoan nhượng,
                             // ra khỏi detectRadius là hủy chase ngay. Nếu ĐANG isAlerted (vừa bị đánh),
                             // ngưỡng nới rộng ra loseRadius (xem effectiveLoseRadius phía trên).
-                            if (!withinChaseRange) { this.state = 'idle'; this.stateTimer = 1.2; this.isEngagingPlayer = false; }
+                            if (!withinChaseRange) { enterIdleState(this); this.isEngagingPlayer = false; }
                             else if (distToPlayer <= this.attackRange) {
                                 // Đủ gần — khóa vị trí+hướng mục tiêu và bắt đầu chuẩn bị lao vào
                                 this.state = 'attack_prep';
@@ -505,7 +590,7 @@
                                 this.attackTargetPos.copy(player.position);
                             } else {
                                 this.stateTimer -= dt;
-                                if (this.stateTimer <= 0) { this.state = 'prep'; this.stateTimer = 0.12; }
+                                if (this.stateTimer <= 0) { this.state = 'prep'; this.stateTimer = randomInRange(SLIME_WANDER_CONFIG.prepDuration); }
                             }
                         }
                         else if (this.state === 'attack_prep') {
@@ -550,7 +635,7 @@
                             this.stateTimer -= dt;
                             if (this.stateTimer <= 0) {
                                 if (withinChaseRange) { this.state = 'chase'; this.stateTimer = this.chaseCooldown; this.isEngagingPlayer = true; } 
-                                else { this.state = 'idle'; this.stateTimer = 1.2; this.isEngagingPlayer = false; }
+                                else { enterIdleState(this); this.isEngagingPlayer = false; }
                             }
                         }
                         else if (this.state === 'attack_land') {
@@ -612,13 +697,13 @@
                                     this.jumpVelocityY = 0;
                                     this.alignToGround(); // Đặt lại Y đúng theo mặt đất tại vị trí mới
                                     this.isGrounded = true;
-                                    this.state = 'idle'; this.stateTimer = 1.0; this.isEngagingPlayer = false;
+                                    enterIdleState(this); this.isEngagingPlayer = false;
                                 } else {
                                     this.position.y = groundY + (this.height / 2); this.isGrounded = true;
                                     if (this.state === 'attack_jump') {
                                         this.state = 'attack_land'; this.stateTimer = 0.15;
                                     } else {
-                                        this.state = 'land'; this.stateTimer = 0.12; 
+                                        this.state = 'land'; this.stateTimer = randomInRange(SLIME_WANDER_CONFIG.landDuration); 
                                     }
                                     if (Math.random() < 0.6) window.spawnRunTrail(this.position, new THREE.Vector3(0, 0, 1));
                                 }
@@ -665,3 +750,5 @@
                 }
             }
             window.Slime = Slime;
+
+

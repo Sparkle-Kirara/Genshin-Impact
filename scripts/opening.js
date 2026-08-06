@@ -615,7 +615,38 @@
         }
 
         // Flow Step 1: Game Launch -> Play logo video / canvas
+        //
+        // SKIP OPENING (chuẩn bị Alpha, mục 1) — người chơi có thể bật toggle trong Settings (giữa
+        // gameplay) để lần khởi động TIẾP THEO bỏ qua toàn bộ Opening Flow (Logo/Title/Character Name
+        // Popup/Door Intro/Loading), đi thẳng vào gameplay. Điều kiện áp dụng CHỈ khi:
+        //   1. window.loadGameData() khác null — đã có save data thật sự (không phải người chơi mới,
+        //      họ CHƯA có cơ hội vào Settings để bật toggle này bao giờ).
+        //   2. data.settings.skipOpening === true — cờ người chơi chủ động bật (mặc định false).
+        //
+        // Đọc THẲNG data.settings.skipOpening (không qua window.skipOpeningEnabled, biến này chỉ được
+        // gán bên trong applySaveData() — hàm CHỈ chạy SAU KHI initThree() bắt đầu, tức là SAU cả bước
+        // quyết định Skip Opening ở đây, xem comment applySaveData() trong 06-camps-save-system.js) —
+        // để tránh phụ thuộc thứ tự load/chạy giữa 2 file.
+        //
+        // KHÔNG áp dụng cho runReturnToTitleFlow() (Return to Title trong 1 session đang chơi) — hàm
+        // đó hoàn toàn tách biệt, không đi qua runGameLaunch(), nên Skip Opening không ảnh hưởng tới
+        // luồng "Start Again" chủ động của người chơi giữa session, chỉ ảnh hưởng Cold Start (mở app).
         function runGameLaunch() {
+            const existingSaveData = window.loadGameData ? window.loadGameData() : null;
+            if (existingSaveData && existingSaveData.settings && existingSaveData.settings.skipOpening === true) {
+                // Ẩn #opening-root NGAY LẬP TỨC (không transition) trước khi gọi enterGameplay() — mục
+                // đích Skip Opening là vào game NGAY, không phải "vào nhanh hơn nhưng vẫn có hiệu ứng
+                // fade 0.6s như bình thường". #opening-root mặc định hiển thị sẵn trong HTML tĩnh
+                // (#stage-logo có class 'active' sẵn, xem index.html) — nếu không ẩn ngay ở đây, người
+                // chơi sẽ thấy thoáng qua 1 frame nền tối của layer Logo (video/canvas logo CHƯA kịp
+                // render gì vì ta return sớm, không gọi playVideoOrFallback) trước khi enterGameplay()
+                // kịp fade nó ra sau 0.6s.
+                const openingRoot = document.getElementById('opening-root');
+                if (openingRoot) openingRoot.style.display = 'none';
+                enterGameplay();
+                return;
+            }
+
             setStage(DOM.stageLogo);
             playVideoOrFallback(
                 DOM.videoLogo,
@@ -676,10 +707,11 @@
         });
 
         // TÍCH HỢP (v0.9 mục 6-7): gọi window.setCharacterName() (hạ tầng có sẵn —
-        // 02-collision-and-stats-core.js, dùng chung với popup nhập tên cũ #player-name-prompt-overlay)
-        // thay vì chỉ lưu vào biến state.charName nội bộ — đây là bước THỰC SỰ ghi tên nhân vật vào
-        // CHARACTER_DATA của game. requestSave() ghi lại ngay để tên không mất nếu người chơi thoát
-        // giữa chừng Opening (trước khi vào gameplay).
+        // 02-collision-and-stats-core.js, ban đầu được xây để dùng chung với popup nhập tên cũ
+        // #player-name-prompt-overlay — overlay đó đã bị gỡ bỏ sau khi luồng nhập tên này thay thế
+        // hoàn toàn nó, xem 04-scene-init.js) thay vì chỉ lưu vào biến state.charName nội bộ — đây là
+        // bước THỰC SỰ ghi tên nhân vật vào CHARACTER_DATA của game. requestSave() ghi lại ngay để tên
+        // không mất nếu người chơi thoát giữa chừng Opening (trước khi vào gameplay).
         //
         // LUỒNG FLOW MỚI: sau khi xác nhận tên, hiện Start Overlay NGAY TẠI Background Stage (KHÔNG
         // còn nhảy sang Door Intro như thiết kế cũ) — người chơi bấm màn hình ở đây trước, Door Intro

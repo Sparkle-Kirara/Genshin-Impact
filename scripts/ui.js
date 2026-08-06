@@ -266,7 +266,7 @@ function initTouchControls() {
         player.jumpRequested = true;
         if (!player.isGrounded && !player.isClimbing && !player.isSwimming) {
             const heightAboveGround = player.position.y - (player.height / 2) - getGroundYForPosition(player.position);
-            if (heightAboveGround > 2.1) {
+            if (heightAboveGround > 2.6) {
                 if (player.isGliding) {
                     deactivateGlider();
                 } else if (player.velocity.y < 3.0 && !player.isPlunging) {
@@ -373,9 +373,10 @@ function initTouchGlobalListeners() {
             // toàn bộ #opening-root (không liệt kê từng ID con) vì bất cứ khi nào nó đang hiển thị,
             // isGamePaused chắc chắn đang true do chính luồng Return to Title gây ra — không có tình
             // huống nào #opening-root hiện mà lại KHÔNG nên nhận touch. #quit-confirm-overlay/
-            // #player-name-prompt-overlay/#reset-save-confirm-overlay vẫn giữ riêng vì chúng có thể mở
-            // ngay TRONG gameplay (Paimon Menu), không nằm trong #opening-root.
-            if (e.target.closest('#menu-left-panel') || e.target.closest('#rpg-sub-window') || e.target.closest('#paimon-star-btn') || e.target.closest('#quit-confirm-overlay') || e.target.closest('#player-name-prompt-overlay') || e.target.closest('#reset-save-confirm-overlay') || e.target.closest('#opening-root')) {
+            // #reset-save-confirm-overlay vẫn giữ riêng vì chúng có thể mở ngay TRONG gameplay (Paimon
+            // Menu), không nằm trong #opening-root. (Đã gỡ #player-name-prompt-overlay khỏi whitelist
+            // này — overlay đó không còn tồn tại, xem ghi chú dọn dẹp gần renderCharacterScreen().)
+            if (e.target.closest('#menu-left-panel') || e.target.closest('#rpg-sub-window') || e.target.closest('#paimon-star-btn') || e.target.closest('#quit-confirm-overlay') || e.target.closest('#reset-save-confirm-overlay') || e.target.closest('#opening-root')) {
                 return;
             }
             e.preventDefault();
@@ -407,7 +408,7 @@ function initTouchGlobalListeners() {
 
         if (isGamePaused || player.isDrowning) {
             // BUGFIX (v0.9): xem chú thích tương ứng ở touchstart phía trên — cùng lý do.
-            if (e.target.closest('#menu-left-panel') || e.target.closest('#quit-confirm-overlay') || e.target.closest('#player-name-prompt-overlay') || e.target.closest('#opening-root')) {
+            if (e.target.closest('#menu-left-panel') || e.target.closest('#quit-confirm-overlay') || e.target.closest('#opening-root')) {
                 return;
             }
             e.preventDefault();
@@ -1159,54 +1160,14 @@ window.renderCharacterScreen = function () {
     if (defText) defText.textContent = p.stats.def;
 };
 
-// ============================================================
-// PLAYER NAME PROMPT (Pre-Alpha v0.8 — UI adjustment)
-// ============================================================
-// Hiện ĐÚNG 1 LẦN lúc bắt đầu hành trình mới (initThree() gọi khi loadGameData() trả về null — xem
-// 04-scene-init.js). Dùng chung togglePauseMenu(true) để khoá input/pointer lock giống hệt lúc mở
-// Pause Menu bình thường — tránh người chơi vẫn di chuyển/điều khiển được trong lúc modal đang che
-// màn hình. KHÔNG dùng window.confirm()/prompt() (native browser dialog) vì spec yêu cầu giao diện
-// riêng theo phong cách game (2 nút Xác nhận/Hủy, style nhất quán với các popup khác).
-window.showPlayerNamePrompt = function () {
-    const overlay = document.getElementById('player-name-prompt-overlay');
-    const input = document.getElementById('player-name-prompt-input');
-    if (!overlay) return;
-
-    if (!window.isGamePaused) window.togglePauseMenu(true);
-    overlay.classList.remove('hidden');
-    overlay.classList.add('flex');
-    if (input) {
-        input.value = '';
-        // Focus sau 1 frame — tránh trường hợp overlay vừa hiện (transition) chưa nhận input ngay.
-        requestAnimationFrame(() => input.focus());
-    }
-};
-
-window.closePlayerNamePrompt = function () {
-    const overlay = document.getElementById('player-name-prompt-overlay');
-    if (overlay) {
-        overlay.classList.add('hidden');
-        overlay.classList.remove('flex');
-    }
-    if (window.isGamePaused) window.togglePauseMenu(false);
-};
-
-// Xác nhận: tên vừa nhập (trim khoảng trắng thừa) — nếu rỗng sau khi trim, coi như Hủy (fallback
-// 'Traveler', xử lý ngay trong setCharacterName() ở game.js, không cần kiểm tra riêng ở đây).
-window.confirmPlayerNamePrompt = function () {
-    const input = document.getElementById('player-name-prompt-input');
-    const name = input ? input.value : '';
-    if (window.setCharacterName) window.setCharacterName(name);
-    if (window.requestSave) window.requestSave(); // Lưu ngay — mục 2: "dữ liệu... sẽ lưu vào data"
-    window.closePlayerNamePrompt();
-};
-
-// Hủy: tên mặc định 'Traveler' (setCharacterName() tự fallback khi truyền chuỗi rỗng).
-window.cancelPlayerNamePrompt = function () {
-    if (window.setCharacterName) window.setCharacterName('');
-    if (window.requestSave) window.requestSave();
-    window.closePlayerNamePrompt();
-};
+// GỠ BỎ (v0.9 — dọn dẹp code chết): khối PLAYER NAME PROMPT (Pre-Alpha v0.8) — 4 hàm
+// showPlayerNamePrompt/closePlayerNamePrompt/confirmPlayerNamePrompt/cancelPlayerNamePrompt và
+// markup #player-name-prompt-overlay (index.html) đã bị xoá — thay thế hoàn toàn bởi Character Name
+// Popup tích hợp sẵn trong Opening/Title Screen (scripts/opening.js — runBackgroundStage(), dùng
+// chung đúng window.setCharacterName() + window.requestSave() từng được xây ở đây). Đường gọi cũ
+// duy nhất (initThree(), 04-scene-init.js) cũng đã được gỡ — xem comment ở đó để biết chi tiết race
+// condition (debounce 300ms của requestSave()) đã khiến khối này trở thành code không bao giờ thực
+// sự hiển thị được trong điều kiện chơi bình thường.
 
 // ============================================================
 // QUIT CONFIRMATION POPUP (Pre-Alpha v0.9 – Prelude)
