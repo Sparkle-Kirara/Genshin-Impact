@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Genshin Impact Pre-Alpha v0.9 - Prelude</title>
+    <title>Genshin Impact Pre-Alpha v0.9.5 - Ascension</title>
     <!-- FLAG: OPENING / TITLE SCREEN ĐANG HIỂN THỊ (Pre-Alpha v0.9) -->
     <!-- Đặt SỚM NHẤT CÓ THỂ (đầu <head>, trước MỌI script khác) — độc lập với thứ tự load của 8 file
          game logic (01-08, có ràng buộc thứ tự nghiêm ngặt riêng, xem comment gần các thẻ <script
@@ -485,7 +485,7 @@
                 <!-- Footer Stats / UID -->
                 <div class="p-4 bg-[#0a0811] border-t border-[#1b172d] flex items-center justify-between text-[11px] text-[#6e6884] font-mono">
                     <span>UID: 810962002</span>
-                    <span>pre-alpha v0.9 - prelude</span>
+                    <span>pre-alpha v0.9.5</span>
                 </div>
             </div>
 
@@ -973,7 +973,12 @@
     </div>
 
     <!-- POPUP NHẬN THƯỞNG (góc trái, dưới quest tracker, tự biến mất sau 2s) -->
-    <div id="reward-popup-container" class="fixed left-4 z-40 flex flex-col gap-2 pointer-events-none" style="top: calc(33.333vh + 90px);">
+    <!-- z-[60]: PHẢI cao hơn #rpg-sub-window (z-50, chứa Paimon Menu/Settings) — Fullscreen Toggle
+         (index.html, gần cuối) gọi showRewardPopup() để cảnh báo khi trình duyệt chặn Fullscreen,
+         và người chơi đang thao tác NGAY TRONG Settings lúc đó — nếu giữ z-40 cũ, toast sẽ bị che
+         khuất phía sau menu, không ai thấy được. Không ảnh hưởng các lần dùng khác (nhận EXP/
+         Primogem lúc chơi bình thường, không có menu nào che ở z-50 trở lên). -->
+    <div id="reward-popup-container" class="fixed left-4 z-[60] flex flex-col gap-2 pointer-events-none" style="top: calc(33.333vh + 90px);">
         <!-- Mỗi phần thưởng nhận được sẽ được JS chèn vào đây -->
     </div>
 
@@ -1588,11 +1593,79 @@
             }
 
             // --- Fullscreen Toggle (Immersive Mode, chuẩn bị Alpha) ---
+            // Ép Fullscreen/thoát Fullscreen NGAY tại thời điểm bật/tắt (khác skipOpeningToggle ở trên,
+            // vốn chỉ lưu lựa chọn cho lần Start kế tiếp) — vì sự kiện `change` của checkbox (do người
+            // dùng click/tap trực tiếp) VẪN được tính là user gesture hợp lệ để gọi Fullscreen API,
+            // khác với việc gọi từ callback bất đồng bộ (setTimeout/Promise) đã bị chặn. CHỈ ép
+            // Fullscreen ở đây — KHÔNG gọi screen.orientation.lock('landscape') (đã xác nhận: Landscape
+            // lock vẫn chỉ áp dụng ở lần bấm Start kế tiếp qua requestImmersiveMode(), scripts/
+            // opening.js, để tránh ép xoay ngang đột ngột giữa lúc đang chơi ở Settings).
             const fullscreenToggle = document.getElementById('fullscreen-toggle');
             if (fullscreenToggle) {
                 fullscreenToggle.addEventListener('change', (e) => {
-                    window.fullscreenEnabled = e.target.checked;
-                    if (window.requestSave) window.requestSave();
+                    const wantsFullscreen = e.target.checked;
+
+                    if (wantsFullscreen) {
+                        const el = document.documentElement;
+                        const requestFs = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+                        if (!requestFs) {
+                            // Trình duyệt không hỗ trợ Fullscreen API — tắt lại checkbox ngay, không
+                            // lưu trạng thái "bật" giả (phản ánh đúng thực tế: yêu cầu không thể thực
+                            // hiện được trên môi trường này).
+                            fullscreenToggle.checked = false;
+                            window.fullscreenEnabled = false;
+                            if (window.requestSave) window.requestSave();
+                            if (window.showRewardPopup) {
+                                window.showRewardPopup('fa-solid fa-triangle-exclamation text-amber-400', 'Trình duyệt không hỗ trợ Fullscreen');
+                            }
+                            return;
+                        }
+                        try {
+                            const fsPromise = requestFs.call(el);
+                            if (fsPromise && typeof fsPromise.catch === 'function') {
+                                fsPromise.then(() => {
+                                    window.fullscreenEnabled = true;
+                                    if (window.requestSave) window.requestSave();
+                                }).catch(() => {
+                                    // Trình duyệt từ chối (VD không coi đây là user gesture hợp lệ, hoặc
+                                    // người dùng huỷ prompt hệ thống) — tắt lại checkbox để phản ánh
+                                    // đúng trạng thái thực tế (KHÔNG ở Fullscreen), không lưu "bật" giả.
+                                    fullscreenToggle.checked = false;
+                                    window.fullscreenEnabled = false;
+                                    if (window.requestSave) window.requestSave();
+                                    if (window.showRewardPopup) {
+                                        window.showRewardPopup('fa-solid fa-triangle-exclamation text-amber-400', 'Trình duyệt đã chặn yêu cầu Fullscreen');
+                                    }
+                                });
+                            } else {
+                                // Trình duyệt cũ không trả Promise (VD Safari cũ) — không có cách nào
+                                // biết chắc thành công/thất bại bất đồng bộ, coi như thành công (best-
+                                // effort, cùng tinh thần requestImmersiveMode()).
+                                window.fullscreenEnabled = true;
+                                if (window.requestSave) window.requestSave();
+                            }
+                        } catch (err) {
+                            fullscreenToggle.checked = false;
+                            window.fullscreenEnabled = false;
+                            if (window.requestSave) window.requestSave();
+                            if (window.showRewardPopup) {
+                                window.showRewardPopup('fa-solid fa-triangle-exclamation text-amber-400', 'Trình duyệt đã chặn yêu cầu Fullscreen');
+                            }
+                        }
+                    } else {
+                        // Tắt: thoát Fullscreen NGAY nếu trình duyệt đang thực sự ở Fullscreen — tránh
+                        // gọi exitFullscreen() thừa (một số trình duyệt throw nếu gọi khi không ở
+                        // Fullscreen) khi người chơi tắt toggle trong lúc chưa từng vào Fullscreen.
+                        const isCurrentlyFullscreen = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+                        if (isCurrentlyFullscreen) {
+                            const exitFs = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+                            if (exitFs) {
+                                try { exitFs.call(document); } catch (err) { /* best-effort */ }
+                            }
+                        }
+                        window.fullscreenEnabled = false;
+                        if (window.requestSave) window.requestSave();
+                    }
                 });
             }
 
@@ -2013,4 +2086,5 @@
     eruda.init();
 </script>
 </body>
+</html>
 </html>
