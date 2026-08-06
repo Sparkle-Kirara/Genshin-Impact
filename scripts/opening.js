@@ -755,8 +755,22 @@
         // lỗi và bỏ qua trong im lặng, KHÔNG chặn hay làm gián đoạn Door Intro Stage phía sau. Đây chỉ
         // là tiện ích UX phụ, không phải yêu cầu bắt buộc để chơi được game (spec: "Không bắt buộc
         // Fullscreen. Không chặn người chơi nếu không thể chuyển Fullscreen").
+        //
+        // TOGGLE FULLSCREEN (chuẩn bị Alpha): người chơi có thể tắt trong Settings (giữa gameplay) —
+        // đọc THẲNG loadGameData() ở đây (không qua window.fullscreenEnabled, biến này chỉ được gán
+        // bên trong applySaveData(), hàm CHỈ chạy SAU initThree() — tức SAU CẢ lúc hàm này cần biết
+        // giá trị, xem comment applySaveData() trong 06-camps-save-system.js) — cùng kỹ thuật đã dùng
+        // cho Skip Opening (runGameLaunch()). Mặc định TRUE nếu chưa có save/chưa có field này — giữ
+        // đúng hành vi GỐC (luôn bật) cho người chơi chưa từng vào Settings đổi gì. Landscape lock nằm
+        // BÊN TRONG nhánh Fullscreen thành công nên tự động tắt theo khi Fullscreen bị tắt qua toggle
+        // này — không cần field riêng cho Landscape (đúng yêu cầu: tắt Fullscreen thì Landscape cũng
+        // không tự ép ngang nữa, kể cả khi người dùng đang để dọc).
         function requestImmersiveMode() {
             try {
+                const existingSaveData = window.loadGameData ? window.loadGameData() : null;
+                const fullscreenEnabled = !existingSaveData || !existingSaveData.settings || existingSaveData.settings.fullscreenEnabled !== false;
+                if (!fullscreenEnabled) return;
+
                 const el = document.documentElement;
                 const requestFs = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
                 if (requestFs) {
