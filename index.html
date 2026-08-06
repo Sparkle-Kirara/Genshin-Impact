@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Genshin Impact Pre-Alpha v0.9.5 - Ascension</title>
-    <!-- FLAG: OPENING / TITLE SCREEN ĐANG HIỂN THỊ (Pre-Alpha v0.9.5) -->
+    <title>Genshin Impact Pre-Alpha v0.9 - Prelude</title>
+    <!-- FLAG: OPENING / TITLE SCREEN ĐANG HIỂN THỊ (Pre-Alpha v0.9) -->
     <!-- Đặt SỚM NHẤT CÓ THỂ (đầu <head>, trước MỌI script khác) — độc lập với thứ tự load của 8 file
          game logic (01-08, có ràng buộc thứ tự nghiêm ngặt riêng, xem comment gần các thẻ <script
          src="scripts/game/...">). Trước đây cờ này được set trong 07-input-handlers.js (load SAU
@@ -485,7 +485,7 @@
                 <!-- Footer Stats / UID -->
                 <div class="p-4 bg-[#0a0811] border-t border-[#1b172d] flex items-center justify-between text-[11px] text-[#6e6884] font-mono">
                     <span>UID: 810962002</span>
-                    <span>pre-alpha v0.9.5 - ascension</span>
+                    <span>pre-alpha v0.9 - prelude</span>
                 </div>
             </div>
 
@@ -538,6 +538,27 @@
                                 </div>
                                 <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
                                     <input type="checkbox" id="skip-opening-toggle" class="sr-only peer">
+                                    <div class="w-11 h-6 bg-[#0d0b17] border border-[#2d284f]/60 rounded-full peer peer-checked:bg-amber-500/80 peer-checked:border-amber-400/60 transition-colors"></div>
+                                    <div class="absolute left-1 top-1 w-4 h-4 bg-[#9c94c0] peer-checked:bg-[#12101e] rounded-full transition-transform peer-checked:translate-x-5"></div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Fullscreen (Immersive Mode toggle, chuẩn bị Alpha) — mặc định BẬT (khớp
+                             hành vi gốc trước khi có toggle này). Tắt = KHÔNG yêu cầu Fullscreen lúc
+                             bấm Start ở lần khởi động TIẾP THEO, VÀ cũng không tự khoá Landscape theo
+                             (Landscape lock phụ thuộc Fullscreen, xem requestImmersiveMode() trong
+                             scripts/opening.js) — dù thiết bị đang ở chế độ dọc, game sẽ không tự ép
+                             ngang nữa. Chỉ ảnh hưởng lần bấm Start TIẾP THEO (đọc lúc đó), không đổi
+                             trạng thái Fullscreen của phiên đang chơi hiện tại. -->
+                        <div class="flex flex-col bg-[#141224]/80 p-4 rounded-xl border border-[#2d284f]/40 gap-3">
+                            <div class="flex items-center justify-between gap-3">
+                                <div class="flex flex-col gap-0.5">
+                                    <span class="text-sm font-semibold text-[#f1e6d0]">Fullscreen</span>
+                                    <span class="text-[11px] text-[#9c94c0]">Toàn màn hình + khoá ngang lúc bắt đầu. Tắt thì không ép ngang màn hình.</span>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                                    <input type="checkbox" id="fullscreen-toggle" class="sr-only peer" checked>
                                     <div class="w-11 h-6 bg-[#0d0b17] border border-[#2d284f]/60 rounded-full peer peer-checked:bg-amber-500/80 peer-checked:border-amber-400/60 transition-colors"></div>
                                     <div class="absolute left-1 top-1 w-4 h-4 bg-[#9c94c0] peer-checked:bg-[#12101e] rounded-full transition-transform peer-checked:translate-x-5"></div>
                                 </label>
@@ -1566,6 +1587,15 @@
                 });
             }
 
+            // --- Fullscreen Toggle (Immersive Mode, chuẩn bị Alpha) ---
+            const fullscreenToggle = document.getElementById('fullscreen-toggle');
+            if (fullscreenToggle) {
+                fullscreenToggle.addEventListener('change', (e) => {
+                    window.fullscreenEnabled = e.target.checked;
+                    if (window.requestSave) window.requestSave();
+                });
+            }
+
             // Infrastructure Update #1 — Save System (yêu cầu bổ sung: lưu Settings) — gọi bởi
             // applySaveData() (game.js) SAU KHI đã ghi window.cameraSensitivityMultiplier từ save data.
             // Chỉ lo đồng bộ UI (slider value + text hiển thị) cho khớp với giá trị vừa khôi phục —
@@ -1579,6 +1609,9 @@
                 }
                 if (typeof settings.skipOpening === 'boolean' && skipOpeningToggle) {
                     skipOpeningToggle.checked = settings.skipOpening;
+                }
+                if (typeof settings.fullscreenEnabled === 'boolean' && fullscreenToggle) {
+                    fullscreenToggle.checked = settings.fullscreenEnabled;
                 }
             };
 
