@@ -177,7 +177,15 @@
                         // Flow (Logo/Title/Door Intro/Loading) ở lần khởi động TIẾP THEO, đi thẳng vào
                         // gameplay. Mặc định false (giữ nguyên trải nghiệm Opening cho người chơi mới/
                         // chưa từng bật). Xem runGameLaunch() (scripts/opening.js) — nơi đọc field này.
-                        skipOpening: window.skipOpeningEnabled === true
+                        skipOpening: window.skipOpeningEnabled === true,
+                        // Fullscreen (Immersive Mode toggle) — mặc định TRUE (khác skipOpening ở trên,
+                        // mặc định false) vì hành vi GỐC của game trước khi có toggle này LUÔN bật
+                        // Fullscreen + Landscape lock lúc bấm Start — người chơi CHƯA từng vào Settings
+                        // đổi gì phải giữ nguyên hành vi cũ, không bị tắt ngầm. Landscape lock PHỤ THUỘC
+                        // Fullscreen (yêu cầu kỹ thuật của Screen Orientation API trên hầu hết trình
+                        // duyệt di động, xem requestImmersiveMode() — scripts/opening.js) nên KHÔNG có
+                        // field riêng cho Landscape — tắt field này tắt luôn cả 2, đúng theo yêu cầu.
+                        fullscreenEnabled: window.fullscreenEnabled !== false
                     }
                 };
             }
@@ -336,6 +344,16 @@
                 // (index.html) — nơi đồng bộ UI checkbox theo giá trị này.
                 if (data.settings && typeof data.settings.skipOpening === 'boolean') {
                     window.skipOpeningEnabled = data.settings.skipOpening;
+                }
+                // Fullscreen (Immersive Mode toggle) — cùng lý do timing với skipOpening ở trên:
+                // window.fullscreenEnabled PHẢI được đọc bởi requestImmersiveMode() (scripts/opening.js)
+                // NGAY lúc bấm nút Start — thời điểm đó XẢY RA TRƯỚC applySaveData() (hàm này chỉ chạy
+                // bên trong initThree(), sau khi enterGameplay() đã gọi startGameplay()). Dòng dưới đây
+                // vì vậy không ảnh hưởng gì tới quyết định Fullscreen của lần bấm Start VỪA XẢY RA —
+                // opening.js đã tự đọc thẳng từ save data lúc đó rồi (xem requestImmersiveMode()) — chỉ
+                // đảm bảo biến luôn đồng bộ đúng cho lần collectSaveData() tiếp theo.
+                if (data.settings && typeof data.settings.fullscreenEnabled === 'boolean') {
+                    window.fullscreenEnabled = data.settings.fullscreenEnabled;
                 }
                 if (window.onSettingsRestored) window.onSettingsRestored(data.settings || {});
             }
