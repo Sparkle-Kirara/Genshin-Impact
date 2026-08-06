@@ -524,6 +524,26 @@
                             </div>
                         </div>
 
+                        <!-- Skip Opening (chuẩn bị Alpha, mục 1) — bật để lần khởi động TIẾP THEO
+                             (Cold Start) bỏ qua toàn bộ Opening Flow (Logo/Title/Character Name Popup/
+                             Door Intro/Loading), đi thẳng vào gameplay. Chỉ áp dụng khi ĐÃ có save
+                             data (xem runGameLaunch(), scripts/opening.js) — người chơi mới chưa từng
+                             có cơ hội bật toggle này nên không bị ảnh hưởng. KHÔNG ảnh hưởng luồng
+                             Return to Title (Start Again) trong 1 session đang chơi. -->
+                        <div class="flex flex-col bg-[#141224]/80 p-4 rounded-xl border border-[#2d284f]/40 gap-3">
+                            <div class="flex items-center justify-between gap-3">
+                                <div class="flex flex-col gap-0.5">
+                                    <span class="text-sm font-semibold text-[#f1e6d0]">Skip Opening</span>
+                                    <span class="text-[11px] text-[#9c94c0]">Bỏ qua Logo/Title/Door Intro ở lần khởi động tiếp theo, vào thẳng gameplay.</span>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                                    <input type="checkbox" id="skip-opening-toggle" class="sr-only peer">
+                                    <div class="w-11 h-6 bg-[#0d0b17] border border-[#2d284f]/60 rounded-full peer peer-checked:bg-amber-500/80 peer-checked:border-amber-400/60 transition-colors"></div>
+                                    <div class="absolute left-1 top-1 w-4 h-4 bg-[#9c94c0] peer-checked:bg-[#12101e] rounded-full transition-transform peer-checked:translate-x-5"></div>
+                                </label>
+                            </div>
+                        </div>
+
                         <!-- Infrastructure Update #1 — Save System (mục 4 spec): cho phép người chơi
                              chủ động xoá toàn bộ dữ liệu lưu, bắt đầu hành trình mới hoàn toàn. Card
                              riêng biệt (viền đỏ nhạt) để tách biệt rõ ràng khỏi các setting thông
@@ -944,30 +964,15 @@
         </div>
     </template>
 
-    <!-- POPUP NHẬP TÊN NGƯỜI CHƠI (Pre-Alpha v0.8 — Character) — chỉ hiện DUY NHẤT 1 lần lúc bắt
-         đầu hành trình mới (chưa có save data), hiển thị/ẩn qua window.showPlayerNamePrompt() /
-         window.closePlayerNamePrompt() (ui.js). Không có nút đóng/backdrop-click — bắt buộc chọn 1
-         trong 2 nút (Xác nhận/Hủy) để tránh trạng thái CHARACTER_DATA.name rỗng/undefined. -->
-    <div id="player-name-prompt-overlay" class="fixed inset-0 z-[80] hidden items-center justify-center bg-black/70 pointer-events-auto">
-        <div class="bg-[#12101e]/95 border border-[#ebdcb9]/40 rounded-2xl px-6 py-6 shadow-2xl w-full max-w-xs mx-4 flex flex-col gap-4">
-            <div class="text-center">
-                <h3 class="text-lg font-bold text-[#f7e8cf] font-serif">Chào mừng, Nhà Lữ Hành</h3>
-                <p class="text-xs text-[#9c94c0] mt-1">Nhập tên cho hành trình của bạn</p>
-            </div>
-            <input id="player-name-prompt-input" type="text" maxlength="16" placeholder="Traveler"
-                   onkeydown="if(event.key==='Enter'){confirmPlayerNamePrompt();}"
-                   class="w-full bg-[#0d0b17] border border-[#2d284f]/60 rounded-lg px-3 py-2 text-sm text-[#f7e8cf] placeholder-[#6e6884] focus:outline-none focus:border-amber-400/60" />
-            <div class="flex gap-3">
-                <button onclick="cancelPlayerNamePrompt()" class="flex-1 py-2 rounded-lg border border-[#2d284f]/60 text-[#9c94c0] text-sm font-semibold hover:bg-[#1f1a35] transition-all">Hủy</button>
-                <button onclick="confirmPlayerNamePrompt()" class="flex-1 py-2 rounded-lg bg-amber-500/80 hover:bg-amber-400/90 text-[#12101e] text-sm font-bold transition-all">Xác nhận</button>
-            </div>
-        </div>
-    </div>
+    <!-- GỠ BỎ (v0.9 — dọn dẹp code chết): #player-name-prompt-overlay (Pre-Alpha v0.8, popup nhập tên
+         cũ) đã bị xoá — thay thế hoàn toàn bởi Character Name Popup tích hợp sẵn trong Opening/Title
+         Screen (#opening-root, scripts/opening.js). Xem comment trong 04-scene-init.js (initThree())
+         và ui.js (gần renderCharacterScreen()) để biết chi tiết lý do gỡ. -->
 
     <!-- QUIT CONFIRMATION POPUP (Pre-Alpha v0.9) -->
     <!-- Mở bởi nút #close-menu-btn (góc dưới thanh utility strip trong Paimon Menu). Style Tailwind
-         inline giữ NHẤT QUÁN với #player-name-prompt-overlay ở trên (cùng tông màu #12101e/#ebdcb9,
-         cùng bố cục 2 nút Hủy/Xác nhận) — không tái dùng .generic-modal-backdrop/.modal-card (đó là
+         inline giữ tông màu #12101e/#ebdcb9 nhất quán với các popup khác trong game (cùng bố cục 2
+         nút Hủy/Xác nhận) — không tái dùng .generic-modal-backdrop/.modal-card (đó là
          style riêng của Opening UI, tông vàng Genshin, không đồng bộ hình ảnh với Paimon Menu). Logic
          mở/đóng/xác nhận nằm trong ui.js (window.showQuitConfirm/hideQuitConfirm/confirmQuitToTitle),
          KHÔNG dùng onclick inline (nhất quán cách event binding của phần lớn ui.js). -->
@@ -1550,6 +1555,17 @@
                 }, { passive: true });
             }
 
+            // --- Skip Opening Toggle (chuẩn bị Alpha, mục 1) ---
+            const skipOpeningToggle = document.getElementById('skip-opening-toggle');
+            if (skipOpeningToggle) {
+                skipOpeningToggle.addEventListener('change', (e) => {
+                    window.skipOpeningEnabled = e.target.checked;
+                    // Cùng pattern camSensSlider ở trên — requestSave() đã có debounce 300ms sẵn, phù
+                    // hợp gọi trực tiếp mỗi lần đổi mà không cần debounce riêng ở đây.
+                    if (window.requestSave) window.requestSave();
+                });
+            }
+
             // Infrastructure Update #1 — Save System (yêu cầu bổ sung: lưu Settings) — gọi bởi
             // applySaveData() (game.js) SAU KHI đã ghi window.cameraSensitivityMultiplier từ save data.
             // Chỉ lo đồng bộ UI (slider value + text hiển thị) cho khớp với giá trị vừa khôi phục —
@@ -1560,6 +1576,9 @@
                 if (typeof settings.cameraSensitivity === 'number' && camSensSlider && camSensValue) {
                     camSensSlider.value = settings.cameraSensitivity;
                     camSensValue.textContent = settings.cameraSensitivity + '%';
+                }
+                if (typeof settings.skipOpening === 'boolean' && skipOpeningToggle) {
+                    skipOpeningToggle.checked = settings.skipOpening;
                 }
             };
 
