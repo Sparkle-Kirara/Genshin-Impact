@@ -65,9 +65,9 @@ const COMIC_CASES = {
                 <div>
                     <strong class="text-[#f1e6d0] text-sm uppercase tracking-wider block mb-2"><i class="fa-solid fa-file-code text-emerald-400"></i> Bằng chứng kỹ thuật</strong>
                     <pre class="bg-black/60 p-3 rounded font-mono text-xs text-emerald-300 border border-amber-950/40"><code>resolveStaticCollisions(player, ...);
-                    // Tọa độ bị thay đổi đột ngột ngoài tầm kiểm soát của Climbing logic:
-                    player.position.x += pushX;
-                    player.position.z += pushZ;</code></pre>
+// Tọa độ bị thay đổi đột ngột ngoài tầm kiểm soát của Climbing logic:
+player.position.x += pushX;
+player.position.z += pushZ;</code></pre>
                 </div>
 
                 <div>
@@ -79,8 +79,8 @@ const COMIC_CASES = {
                     <strong class="text-[#f1e6d0] text-sm uppercase tracking-wider block mb-2"><i class="fa-solid fa-wrench text-sky-400"></i> Bản Vá (The Fix v0.6.9)</strong>
                     <p class="text-stone-400">Ban hành dòng luật mới: Khi player đang ở trạng thái leo trèo vách, hệ thống sẽ bỏ qua hoàn toàn cơ chế Static Collision Resolution chuẩn trên cạn, ủy thác việc bám dính an toàn cho Climbing logic tự động.</p>
                     <pre class="bg-black/60 p-3 rounded font-mono text-xs text-sky-300 border border-amber-950/40 mt-2"><code>if (!player.isClimbing) {
-                    resolveStaticCollisions(player, ...);
-                    }</code></pre>
+    resolveStaticCollisions(player, ...);
+}</code></pre>
                 </div>
 
                 <div class="bg-stone-950 p-4 rounded-lg border border-amber-900/30 italic text-stone-400">
@@ -219,7 +219,7 @@ if (player.isSwimming && player.stamina <= 0) {
     },
     4: {
         caseId: "CASE: RT-004 (Project Revival)",
-        tag: "NEW • RT-004",
+        tag: "RESOLVED • RT-004",
         tagColor: "text-violet-400",
         title: "📂 VỤ ÁN #4: “THE RETURN OF THE ARCHIVE”",
         listTitle: "📂 CASE 4: The Return of the Archive",
@@ -277,6 +277,94 @@ COMIC_CASES[5] = { caseId, tag, tagColor, title, summary, content };
 
                 <div class="bg-stone-950 p-4 rounded-lg border border-amber-900/30 italic text-stone-400">
                     "Một dự án không chết khi nó dừng lại — nó chỉ thực sự kết thúc khi không ai còn quay lại mở cánh cửa văn phòng cũ. Cánh cửa ấy vừa được mở lại."
+                </div>
+            </div>
+        `
+    },
+    5: {
+        caseId: "CASE: PA-005 (Ascension)",
+        tag: "NEW • PA-005",
+        tagColor: "text-amber-400",
+        title: "🎉 PRE-ALPHA COMPLETE: v0.9.5 “Ascension”",
+        listTitle: "🌅 CASE 5: Ascension",
+        summary: "After months of development, the project has finally reached the end of its Pre-Alpha stage. This is the end of the first chapter.",
+        content: `
+            <div class="space-y-4">
+                <div class="bg-amber-950/20 p-4 border-l-4 border-amber-500 rounded font-serif">
+                    <strong class="text-amber-300">PROLOGUE:</strong><br>
+                    Sau nhiều tháng phát triển, dự án Genshin Impact (fan-made) đã hoàn thành toàn bộ mục tiêu của giai đoạn Pre-Alpha.
+                    <br><br>
+                    Từ những dòng code đầu tiên, dự án dần hình thành nên một nền tảng gameplay hoàn chỉnh và đủ ổn định để bước sang giai đoạn phát triển tiếp theo.
+                </div>
+
+                <div>
+                    <strong class="text-[#f1e6d0] text-sm uppercase tracking-wider block mb-2"><i class="fa-solid fa-trophy text-amber-400"></i> Major Milestones (Cột Mốc Đã Đạt)</strong>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2 font-mono text-xs">
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Gameplay Foundation</div>
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Combat System</div>
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Character System</div>
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Party System</div>
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Mobile & PC HUD</div>
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Inventory</div>
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Dialogue</div>
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Opening / Title Screen</div>
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Auto Save</div>
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Session Resume</div>
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Aim Mode</div>
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Stamina System</div>
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Character Switching</div>
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Numerous Bug Fixes</div>
+                        <div class="bg-[#2a2420] p-2 rounded border border-amber-900/30 text-amber-200 flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> UI/UX Improvements</div>
+                    </div>
+                </div>
+
+                <div class="rpg-divider my-4"></div>
+
+                <div>
+                    <strong class="text-[#f1e6d0] text-sm uppercase tracking-wider block mb-2"><i class="fa-solid fa-sun text-yellow-400"></i> Ascension – Trọng Tâm v0.9.5</strong>
+                    <p class="text-stone-400">Phiên bản <strong class="text-amber-200">v0.9.5 – Ascension</strong> tập trung vào việc cô đọng và hoàn thiện tối đa chất lượng nền tảng:</p>
+                    <ul class="list-disc pl-5 text-xs text-stone-300 space-y-1 mt-2">
+                        <li>Hoàn thiện các hệ thống cốt lõi và sửa triệt để các lỗi còn tồn đọng.</li>
+                        <li>Cân bằng gameplay và nâng cấp trải nghiệm người dùng (UI/UX).</li>
+                        <li>Tối ưu & hoàn thiện các cơ chế: Aim Mode, Stamina System.</li>
+                        <li>Bổ sung tính năng Skip Opening giúp rút ngắn thời gian vào game.</li>
+                        <li>Đánh bóng toàn bộ nền tảng trước khi bước vào giai đoạn Alpha.</li>
+                    </ul>
+                    <p class="text-xs italic text-amber-300/80 mt-2">* Phiên bản này không bổ sung các hệ thống lớn mới với mục tiêu tạo ra một bản dựng ổn định nhất có thể.</p>
+                </div>
+
+                <div class="rpg-divider my-4"></div>
+
+                <div>
+                    <strong class="text-[#f1e6d0] text-sm uppercase tracking-wider block mb-2"><i class="fa-solid fa-flag-checkered text-emerald-400"></i> Result (Kết Quả & Định Hướng Mới)</strong>
+                    <p class="text-stone-400">Giai đoạn Pre-Alpha chính thức khép lại. Toàn bộ nền móng của dự án hiện đã đủ vững chắc để chuyển mình bước sang giai đoạn phát triển Alpha.</p>
+                    <div class="bg-black/40 border border-amber-900/40 rounded-lg p-3 mt-3 text-center">
+                        <span class="text-stone-400 text-[11px] uppercase tracking-widest block font-mono">Chuyển đổi trọng tâm phát triển</span>
+                        <div class="flex items-center justify-center gap-3 mt-2 font-bold font-mono text-xs sm:text-sm">
+                            <span class="text-stone-300 bg-stone-900 px-3 py-1.5 rounded border border-stone-800">Xây nền móng</span>
+                            <span class="text-amber-400"><i class="fa-solid fa-arrow-right"></i></span>
+                            <span class="text-emerald-400 bg-emerald-950/40 px-3 py-1.5 rounded border border-emerald-900/50">Mở rộng thế giới game</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-stone-950 p-4 rounded-lg border border-amber-900/30 text-stone-300 text-center space-y-2">
+                    <p class="font-serif text-amber-200 text-sm leading-relaxed">
+                        « "Every great journey begins with a single step.<br>
+                        Pre-Alpha was the first step.<br>
+                        Alpha is where the adventure truly begins." »
+                    </p>
+                </div>
+
+                <div class="flex items-center justify-between bg-[#141224] p-3 rounded-lg border border-[#2d284f]/60 text-xs font-mono">
+                    <div>
+                        <span class="text-emerald-400 font-bold block">Pre-Alpha Complete</span>
+                        <span class="text-stone-400 text-[10px]">v0.9.5 — Ascension</span>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-amber-400 font-bold block">Next Chapter →</span>
+                        <span class="text-stone-300 text-[10px]">Alpha v1.0</span>
+                    </div>
                 </div>
             </div>
         `
