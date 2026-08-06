@@ -648,6 +648,7 @@
                     <div id="menu-content-comic" class="hidden flex flex-col gap-4 h-full min-h-0">
                         <h3 class="text-xl font-bold text-[#ebdcb9] font-serif border-b border-[#2d284f]/40 pb-2">Devlog Case Archive</h3>
                         <p class="text-[11px] text-[#9c94c0] font-serif italic mb-2">Technical report logs solved by the AI investigative bureau.</p>
+                        <p class="text-[10px] text-amber-400/80 -mt-2 mb-1 flex items-center gap-1.5"><i class="fa-solid fa-mobile-screen-button"></i> Gợi ý: xoay dọc màn hình để đọc thoải mái hơn.</p>
 
                         <div id="comic-case-list" class="flex flex-col gap-3">
                             <!-- Danh sách case được render động bởi renderComicBookcase() (comic.js).
@@ -667,6 +668,11 @@
                         </div>
 
                         <h4 id="story-reader-title" class="text-base font-bold font-serif text-[#ebdcb9] mb-3 text-center"></h4>
+
+                        <!-- TIP SLOT — hệ thống Tips chung (window.UI_TIPS, ui.js), render bởi
+                             renderTip('comic-reader') mỗi lần mở 1 case (xem openStoryReader(), ui.js).
+                             Rỗng nếu không có tip nào khớp context này. -->
+                        <div id="tip-slot-comic-reader"></div>
 
                         <!-- Scrollable story container: flex-1 để lấp đầy phần không gian còn lại
                              của comic-story-reader, thay vì chiều cao cố định h-[340px] như trước. -->
@@ -2087,4 +2093,4 @@
 </script>
 </body>
 </html>
-</html>
+ml>
