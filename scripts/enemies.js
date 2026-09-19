@@ -39,7 +39,19 @@
                     // xem bên dưới constructor) vào đúng this.stats.hp/maxHp.
                     this.stats = { maxHp: 999999, hp: 999999, atk: 0, def: 0 };
                     this.alive = true; this.respawnTimer = 0; this.flashTimer = 0;
+                    // Character #3 (Polearm) Validation — Damage Source Metadata: lastDamageSource
+                    // ghi lại impact.source của lần takeDamage() GẦN NHẤT (null nếu chưa từng bị đánh
+                    // hoặc lần gần nhất không mang metadata source) — dùng bởi Reactive Skill (HP
+                    // polling, xem 09-character-system.js/combat.js) để biết damage vừa xảy ra có
+                    // "canTriggerReactiveEffects" hay không, KHÔNG đổi chữ ký takeDamage().
+                    this.lastDamageSource = null;
                     this.knockback = new THREE.Vector3();
+                    // Hit Reaction / Poise System v1 — yêu cầu đã xác nhận: class Enemy (placeholder/
+                    // testing bất tử) CHỈ cần field poise để hệ thống không crash nếu lỡ có code khác
+                    // gọi resolveHitReaction()/đọc enemy.poise — KHÔNG triển khai Interrupt/Stagger
+                    // behavior thật cho class này (không có AI state machine đáng kể để interrupt).
+                    this.poise = { current: 100, max: 100 };
+                    this.weightClass = 'heavy';
                     this.idleTimer = Math.random() * 100;
                     
                     const group = new THREE.Group();
@@ -97,7 +109,18 @@
                     this.aabb.updateFromObject(this.mesh, this.width, this.height, this.depth);
                 }
                 
-                takeDamage(amount, direction, isHydro) {
+                // Hit Reaction / Poise System v1 — yêu cầu đã xác nhận: class Enemy (placeholder)
+                // KHÔNG cần Interrupt/Stagger behavior thật, chỉ cần field poise tồn tại (xem
+                // constructor) để không crash nếu code khác lỡ đọc/gọi resolveHitReaction(). Tham số
+                // `impact` (thứ 4) được CHẤP NHẬN nhưng CỐ Ý KHÔNG dùng — giữ nguyên hành vi knockback
+                // cũ (enemyRecoilForce.normal) 100%, không thêm logic gì.
+                takeDamage(amount, direction, isHydro, impact) {
+                    // Character #3 (Polearm) Validation — Damage Source Metadata: ghi lại NGAY ĐẦU
+                    // hàm, TRƯỚC bất kỳ xử lý nào khác (đúng yêu cầu — dù class Enemy này KHÔNG thật
+                    // sự trừ HP thấp qua field stats.hp theo cách Slime làm, vẫn ghi nhận nhất quán để
+                    // không có nhánh nào bị bỏ sót nếu sau này có code khác dùng class Enemy để test).
+                    this.lastDamageSource = (impact && impact.source) ? impact.source : null;
+
                     this.flashTimer = 0.18; 
                     this.bodyMesh.material = isHydro ? this.hydroFlashMaterial : this.flashMaterial;
                     this.knockback.copy(direction).normalize().multiplyScalar(window.COMBAT_FEEL_CONFIG.enemyRecoilForce.normal); 
@@ -233,30 +256,178 @@
                 slime.stateTimer = randomInRange(SLIME_WANDER_CONFIG.idleDuration);
             }
 
+            // enterHitReactionState(slime, reaction, direction): Hit Reaction / Poise System v1 —
+            // Phase 4 — helper TẬP TRUNG việc chuyển 1 slime sang state 'hitReaction' khi
+            // resolveHitReaction() (combat.js) trả về interrupt=true. Tái dùng ĐÚNG pattern
+            // enterIdleState() ở trên (1 hàm, gọi từ nhiều điểm trong takeDamage() thay vì lặp lại
+            // logic gán state/timer rải rác).
+            //
+            // CHỦ ĐÍCH KHÔNG làm ở đây (đúng scope Phase 4 đã chốt — "sửa behavior, không balance"):
+            //   - KHÔNG tự tính lại staggerDuration/knockbackForce — 2 giá trị này đã có sẵn trong
+            //     `reaction` (do resolveHitReaction() tính), hàm này CHỈ áp dụng, không tính toán.
+            //   - KHÔNG đổi this.knockback — takeDamage() đã set knockback TRƯỚC khi gọi hàm này
+            //     (giữ nguyên vị trí code cũ, xem takeDamage() bên dưới), tránh trùng trách nhiệm.
+            //
+            // "Không tạo thêm timer nếu hitReactionTimer đã đủ" (yêu cầu đã chốt): nếu slime đang
+            // stagger dở (hitReactionTimer > 0 từ đòn TRƯỚC) và ăn thêm 1 đòn interrupt MỚI, hàm này
+            // vẫn ghi đè bằng staggerDuration MỚI (không cộng dồn 2 timer) — vì reaction MỚI luôn đại
+            // diện đúng nhất cho đòn vừa xảy ra, cộng dồn sẽ gây stagger-lock kéo dài ngoài ý muốn
+            // (rủi ro đã nêu ở mục M báo cáo Phase 3).
+            //
+            // Hủy jump velocity khi đang airborne (yêu cầu bước 3 đã chốt): reset jumpVelocity/
+            // jumpVelocityY về 0 NHƯNG giữ nguyên isGrounded hiện tại — nếu slime đang bay
+            // (isGrounded === false), KHÔNG ép isGrounded = true (sẽ = teleport xuống đất ngay lập
+            // tức, vi phạm yêu cầu "không teleport"). Khối physics ở update() (nhánh `else` khi
+            // !isGrounded, xem enemies.js update()) sẽ tự tiếp tục áp dụng trọng lực
+            // (jumpVelocityY -= gravity*dt) cho slime rơi tự nhiên xuống đất — vì jumpVelocityY lúc
+            // này = 0, slime rơi thẳng đứng từ vị trí hiện tại, không còn trôi theo hướng jump cũ.
+            // Khi chạm đất, code landing SẴN CÓ (xem update()) sẽ tự chuyển sang 'attack_land' (nếu
+            // this.state vẫn đang === 'attack_jump' lúc chạm đất) hoặc 'land' (mọi state khác, bao
+            // gồm 'hitReaction') — ĐÂY LÀ LÝ DO hàm này phải đổi this.state SANG 'hitReaction' NGAY,
+            // để logic landing có sẵn tự động chọn nhánh 'land' đúng ý "chuyển sang trạng thái phù
+            // hợp để rơi/land" mà không cần thêm code riêng ở khối physics.
+            //
+            // Phase 4 — Launch Hit Reaction: khi reaction.level === 'launch', 2 điểm khác biệt so với
+            // stagger/heavy thường:
+            //   1. isGrounded ĐƯỢC ép = false (thay vì giữ nguyên như các level khác) — BẮT BUỘC, vì
+            //      jumpVelocityY chỉ bị trừ dần bởi gravity trong nhánh airborne của update() (khối
+            //      "else { this.jumpVelocityY -= player.gravity * dt; ... }") — nếu giữ isGrounded =
+            //      true (VD slime đang 'prep'/'chase' lúc bị launch), jumpVelocityY sẽ KHÔNG bao giờ
+            //      được gravity xử lý, slime "launch" nhưng không thực sự bay lên được. Điều này vẫn
+            //      tuân thủ "không teleport" — không đổi position.y trực tiếp, chỉ đổi velocity, y hệt
+            //      cách state 'jump' bình thường tự nhấc slime lên khỏi đất.
+            //   2. jumpVelocityY được SET (không phải reset về 0) bằng reaction.verticalForce — ĐÚNG
+            //      yêu cầu "reset/set giá trị launch mới, KHÔNG cộng dồn" (this.jumpVelocityY +=
+            //      SẼ SAI, biến Launch thành juggle cộng dồn ngoài ý muốn). Nếu slime đang airborne từ
+            //      1 Launch TRƯỚC (case "hitReaction → bị Launch lần nữa", mục 4/8 yêu cầu) và ăn thêm
+            //      Launch #2, dòng set thẳng bên dưới TỰ ĐỘNG ghi đè jumpVelocityY cũ bằng giá trị mới
+            //      — không cần code riêng cho case "multiple launch hits", vì phép gán "=" (không phải
+            //      "+=") đã đúng ý muốn ở mọi trường hợp gọi lại hàm này.
+            //   3. jumpVelocity (ngang, dùng cho di chuyển ngang lúc jump) VẪN reset về 0 như bình
+            //      thường — Launch dùng this.knockback (kênh horizontal riêng, xem takeDamage()) để
+            //      đẩy ngang, KHÔNG dùng jumpVelocity — đúng yêu cầu "Horizontal vẫn dùng this.knockback".
+            function enterHitReactionState(slime, reaction, direction) {
+                slime.state = 'hitReaction';
+                slime.hitReactionTimer = reaction.staggerDuration;
+                // Lưu hướng bị đẩy — CHƯA dùng cho animation recoil ở Phase 4 (thuộc phạm vi Phase
+                // Reaction Tuning sau này), chỉ lưu sẵn field để Phase sau đọc thẳng, không cần sửa
+                // lại chữ ký hàm/thêm tham số khi cần.
+                if (direction && direction.lengthSq() > 0.0001) {
+                    slime.hitReactionDirection.copy(direction).normalize();
+                }
+                slime.jumpVelocity.set(0, 0, 0);
+                if (reaction.level === 'launch' && reaction.verticalForce > 0) {
+                    slime.jumpVelocityY = reaction.verticalForce; // SET, không cộng dồn — xem giải thích ở trên
+                    slime.isGrounded = false; // bắt buộc để gravity (nhánh airborne update()) xử lý
+                    // Reaction Tuning — Launch Trajectory Consistency: decay rate NGANG (knockback)
+                    // được làm CHẬM lại riêng cho 'launch', để khớp thời lượng bay THẬT (staggerDuration
+                    // launch = 0.65s) thay vì dùng chung hằng số 12 (tắt gần hết chỉ sau ~0.3s, xem
+                    // giải thích đầy đủ tại field knockbackDecayRate ở constructor). GIÁ TRỊ PLACEHOLDER
+                    // — 3 chọn sao cho ở cuối staggerDuration (0.65s) vẫn còn ~15% lực đẩy ngang
+                    // (exp(-3*0.65) ≈ 0.14), thay vì gần như bằng 0 như decay=12 cũ — để enemy vẫn còn
+                    // trôi ngang nhẹ lúc chạm đất, tạo cảm giác đường vòng liền mạch thay vì rơi thẳng
+                    // đứng ở nửa sau quỹ đạo. SẼ tinh chỉnh số chính xác ở Phase Reaction Tuning kế
+                    // tiếp sau khi test trên device — đây chỉ là ước lượng toán học ban đầu, chưa qua
+                    // kiểm chứng cảm giác thực tế.
+                    slime.knockbackDecayRate = 3;
+                    // Debug log tối thiểu (yêu cầu mục 11) — CHỈ để kiểm tra implementation lúc test
+                    // trên device, có thể tắt/xóa ở Phase Reaction Tuning sau.
+                    if (window.DEBUG_HIT_REACTION) {
+                        console.log('[HitReaction] launch');
+                        console.log('[HitReaction] horizontal force:', reaction.knockbackForce);
+                        console.log('[HitReaction] vertical force:', reaction.verticalForce);
+                    }
+                } else {
+                    slime.jumpVelocityY = 0;
+                    // knockbackDecayRate RESET về mặc định (12) cho mọi reaction KHÔNG phải launch —
+                    // đảm bảo nếu 1 slime từng bị launch trước đó (decayRate=3 còn sót lại) rồi ăn tiếp
+                    // 1 đòn light/medium/heavy thường, hành vi decay quay lại ĐÚNG như cũ, không bị
+                    // "dính" decay chậm của lần launch trước.
+                    slime.knockbackDecayRate = 12;
+                    // isGrounded KHÔNG bị đổi ở đây với reaction không phải launch — giữ nguyên giá
+                    // trị hiện tại của slime (true nếu đang chase/prep lúc bị đánh, false nếu đang
+                    // jump/attack_jump) — đúng yêu cầu "giữ trạng thái airborne nếu đang ở trên không".
+                }
+                slime.isEngagingPlayer = false;
+            }
+
             class Slime {
-                constructor(x, z, isLarge = false) {
+                constructor(x, z, isLarge = false, level = 1) {
                     this.id = window.nextEnemyId++; this.isSlime = true;
+                    // Stat Baseline Update v1 — level: field MỚI, dùng cho DEF mitigation kiểu
+                    // Genshin ở chiều Player -> Enemy (xem calculatePlayerToEnemyDamage(), combat.js
+                    // — CÔNG THỨC phụ thuộc CHÊNH LỆCH LEVEL giữa attacker/enemy, KHÔNG dùng
+                    // this.stats.def nữa). Mặc định = 1 (AN TOÀN NGƯỢC — mọi lời gọi `new Slime(x,z,
+                    // isLarge)` hiện tại không truyền level vẫn hoạt động đúng, enemy luôn Lv.1).
+                    this.level = level;
                     if (isLarge) {
                         this.isLarge = true; this.width = 2.8; this.height = 2.0; this.depth = 2.8;
                         this.speed = 2.0; this.chaseSpeed = 4.4;
                         this.detectRadius = 15.0; this.loseRadius = 30.0; this.chaseCooldown = 0.6; this.jumpPowerY = 9.0;
-                        // --- CORE STATS (v0.7) — số liệu Large Slime theo core_stats.md mục 7.
-                        this.stats = { maxHp: 300, hp: 300, atk: 20, def: 14 };
+                        // Stat Baseline Update v1 — HP/ATK Lv.1 TÍNH TỪ Genshin Enemy/Level Scaling
+                        // chính thức (Base HP 27.168 × Type1 HP Mult Lv1 5.367859 ≈ 146; Base ATK
+                        // "Large Hydro/Anemo/Dendro Slime" 35.168 × Type1 ATK Mult Lv1 2.02052 ≈ 71
+                        // — game không phân biệt nguyên tố Large Slime nên dùng nhóm Hydro/Anemo/
+                        // Dendro làm đại diện, KHÔNG phải nhóm Electro/Cryo/Pyro/Geo cao hơn).
+                        // def: 14 GIỮ NGUYÊN số cũ — KHÔNG còn dùng cho DEF mitigation Player->Enemy
+                        // (đã chốt đổi sang công thức theo level), field này giữ lại phòng khi hữu
+                        // ích cho hệ thống khác sau này (yêu cầu đã xác nhận, không xóa).
+                        this.stats = { maxHp: 146, hp: 146, atk: 71, def: 14 };
                         this.expReward = 30; // dùng bởi onSlimeKilled() (game.js) khi tính EXP rơi ra
                         this.attackRange = 2.1; // khoảng cách để bắt đầu chuẩn bị tấn công
                         this.attackTelegraphDuration = 0.45; // giây chuẩn bị trước khi lao vào
                         this.attackHitRange = 2.5; // khoảng cách tối đa để đòn đánh trúng
+                        // Hit Reaction / Poise System v1 — yêu cầu đã xác nhận: Large Slime =
+                        // weightClass "heavy" (tham chiếu Genshin: Large Slime weight 100 vs Small
+                        // Slime weight 60, thuộc nhóm poise khác nhau) — Normal/Light impact khó/không
+                        // stagger được, chỉ Heavy/Charged impact mới có khả năng. resistance=1.0
+                        // (baseline, chưa có buff/debuff nào ở Alpha v1.0). Đọc qua
+                        // resolveHitReaction() (combat.js) trong takeDamage() bên dưới — KHÔNG dùng
+                        // HP để giả lập Poise (2 hệ thống độc lập hoàn toàn).
+                        this.poise = { weightClass: 'heavy', resistance: 1.0 };
                     } else {
                         this.isLarge = false; this.width = 1.6; this.height = 0.8; this.depth = 1.6;
                         this.speed = 3.5; this.chaseSpeed = 7.2; 
                         this.detectRadius = 15.0; this.loseRadius = 30.0; this.chaseCooldown = 0.35; this.jumpPowerY = 7.2;
-                        // --- CORE STATS (v0.7) — số liệu Small Slime theo core_stats.md mục 7.
-                        this.stats = { maxHp: 120, hp: 120, atk: 14, def: 8 };
+                        // Stat Baseline Update v1 — HP/ATK Lv.1 TÍNH TỪ Genshin Enemy/Level Scaling
+                        // chính thức (Base HP "Slime (Small)" 10.8672 × Type1 HP Mult Lv1 5.367859 ≈
+                        // 58; Base ATK "Slime (Small, Most)" 7.536 × Type1 ATK Mult Lv1 2.02052 ≈ 15).
+                        // def: 8 GIỮ NGUYÊN số cũ — cùng lý do như Large Slime ở trên.
+                        this.stats = { maxHp: 58, hp: 58, atk: 15, def: 8 };
                         this.expReward = 10;
                         this.attackRange = 1.7;
                         this.attackTelegraphDuration = 0.3;
                         this.attackHitRange = 2.1;
+                        // Hit Reaction / Poise System v1 — yêu cầu đã xác nhận: Small Slime =
+                        // weightClass "light".
+                        this.poise = { weightClass: 'light', resistance: 1.0 };
                     }
+                    // hitReactionTimer: đếm ngược Stagger Duration hiện tại (giây) — TÁCH BIỆT hoàn
+                    // toàn khỏi player.staggerTimer (field khác, thuộc hướng Enemy->Player, ngoài
+                    // phạm vi Alpha v1.0 này). Alpha v1.0 CHỈ dùng để hiển thị/debug + làm điều kiện
+                    // hiệu ứng phụ (flash lâu hơn khi stagger mạnh) — KHÔNG khoá thêm hành vi AI nào
+                    // ngoài Interrupt tức thời (xem takeDamage()/update() bên dưới) — đúng phạm vi đã
+                    // chốt "chưa triển khai Poise meter/Resistance buildup phức tạp".
+                    this.hitReactionTimer = 0;
+                    // hitReactionDirection: Phase 4 — hướng bị đẩy lúc interrupt xảy ra (xem
+                    // enterHitReactionState()). CHƯA dùng cho animation recoil ở Phase 4 (thuộc
+                    // phạm vi Phase Reaction Tuning sau này) — chỉ lưu sẵn để không phải sửa chữ ký
+                    // hàm khi cần dùng tới.
+                    this.hitReactionDirection = new THREE.Vector3();
+                    // knockbackDecayRate: Reaction Tuning — Launch Trajectory Consistency. Trước đây
+                    // MỌI reaction level dùng CHUNG 1 hằng số decay cứng (Math.exp(-12*dt), xem
+                    // update()) cho this.knockback (thành phần NGANG). Vấn đề: với 'launch', thành
+                    // phần DỌC (jumpVelocityY) chịu gravity nên kéo dài suốt cả staggerDuration
+                    // (0.65s, xem REACTION_LEVEL_CONFIG), trong khi decay=12 khiến knockback ngang tắt
+                    // gần hết chỉ sau ~0.3s — kết quả 2 thành phần lệch timeline: nửa đầu quỹ đạo bay
+                    // CÓ di chuyển ngang lẫn dọc (đúng ý đường vòng tự nhiên), nhưng nửa sau CHỈ còn
+                    // rơi thẳng đứng (ngang đã tắt), tạo cảm giác "đẩy ngang trước, rơi dọc sau" dù về
+                    // bản chất cả 2 vẫn cộng dồn cùng frame. Field này cho phép enterHitReactionState()
+                    // ĐẶT RIÊNG decay rate mỗi lần reaction xảy ra — mặc định vẫn = 12 (giữ NGUYÊN
+                    // hành vi cũ cho none/light/medium/heavy, KHÔNG đổi cảm giác stagger hiện có), CHỈ
+                    // 'launch' được set thấp hơn để khớp đúng thời lượng bay. Đọc trong khối áp dụng
+                    // knockback ở update() (dòng ~972) thay vì hard-code 12 tại đó.
+                    this.knockbackDecayRate = 12;
                     this.attackTargetPos = new THREE.Vector3(); // vị trí player được "khóa" lúc bắt đầu chuẩn bị
                     this.player_hasBeenHitThisAttack = false; // tránh gây damage nhiều lần trong 1 lần lao
 
@@ -264,6 +435,11 @@
                     this.position = new THREE.Vector3(x, initialY + this.height / 2, z);
                     this.velocity = new THREE.Vector3(0, 0, 0);
                     this.alive = true; this.respawnTimer = 0; this.flashTimer = 0; this.knockback = new THREE.Vector3();
+                    // Character #3 (Polearm) Validation — Damage Source Metadata: ĐÚNG PATTERN class
+                    // Enemy ở trên (xem constructor đó) — lastDamageSource ghi lại impact.source của
+                    // lần takeDamage() GẦN NHẤT, dùng bởi Reactive Skill (HP polling) để biết damage
+                    // vừa xảy ra có canTriggerReactiveEffects hay không.
+                    this.lastDamageSource = null;
                     // --- ENEMY HP BAR (v0.7) — hiện khi vừa bị đánh HOẶC player ở gần, ẩn sau khoảng
                     // lặng không có gì xảy ra (xem update()). Đếm NGƯỢC về 0 = còn hiện, <=0 = ẩn.
                     this.hpBarVisibleTimer = 0;
@@ -405,13 +581,41 @@
                 // Debuff/Elemental Damage/Elemental Reaction/Shield/Healing vào ĐÚNG bước tương ứng
                 // trong tương lai, thay vì phải dò lại toàn bộ hàm). `multiplier` là hệ số riêng theo
                 // loại đòn của player (KHÔNG phải damage tuyệt đối) — xem giải thích ở game.js.
-                takeDamage(multiplier, direction, isHydro) {
-                    // Bước 1: người tấn công gây sát thương — LUÔN là player ở v0.7 (chưa có nguồn sát
-                    // thương nào khác nhắm vào Enemy).
+                // Talent System v2 — BUG FIX QUAN TRỌNG: comment cũ (Pre-Alpha v0.7) mô tả tham số
+                // đầu là "multiplier" và hàm này TỰ tính Final Damage qua calculateFinalDamage() —
+                // ĐÚNG với kiến trúc CŨ, nhưng đã LỖI THỜI từ khi Talent System v2 đổi kiến trúc
+                // (đã xác nhận với người dùng): mọi nơi gọi (file 08 melee, combat.js plunge, file
+                // 09 skill/burst) giờ tự tính ĐẦY ĐỦ Final Damage qua calculatePlayerToEnemyDamage()
+                // (combat.js) TRƯỚC KHI gọi takeDamage() — nhưng code bên dưới VẪN CÒN nguyên logic
+                // cũ, tự nhân THÊM 1 lớp (player.stats.atk × DEF mitigation kiểu cũ) lên trên Final
+                // Damage đã tính sẵn -> BUG NHÂN CHỒNG (sát thương cao bất thường đã xác nhận, VD
+                // đòn Normal #1 lẽ ra ~4 nhưng ra ~70 vì bị nhân thêm atk=18 và chia lại DEF).
+                //
+                // Từ v2: tham số đầu là `damage` — Final Damage ĐÃ TÍNH SẴN ở tầng attacker (đúng
+                // pipeline Character Stats -> Talent Scaling -> Raw Damage -> DEF Mitigation, xem
+                // combat.js) — hàm này CHỈ trừ HP + hiệu ứng phụ, KHÔNG tính toán gì thêm. Enemy
+                // KHÔNG cần biết nhân vật đang scale bằng ATK/HP/DEF hay Talent% bao nhiêu (đúng
+                // nguyên tắc tách trách nhiệm đã chốt).
+                //
+                // Hit Reaction / Poise System v1 — tham số MỚI `impact` (thứ 4, optional — mặc định
+                // null nếu không truyền, AN TOÀN NGƯỢC cho bất kỳ lời gọi cũ nào chưa cập nhật): data
+                // thuần { strength, type, knockback } của đòn đánh, đưa qua resolveHitReaction()
+                // (combat.js) CÙNG this.poise (weightClass/resistance, xem constructor) để ra Reaction
+                // Level/Stagger/Interrupt/Knockback — HOÀN TOÀN ĐỘC LẬP với finalDamage/HP ở trên
+                // (không dùng HP để giả lập Poise, đúng yêu cầu đã xác nhận). Nếu impact không được
+                // truyền (null/undefined), fallback về hành vi knockback CŨ (enemyRecoilForce) để
+                // không phá bất kỳ lời gọi takeDamage() nào chưa cập nhật impact.
+                takeDamage(damage, direction, isHydro, impact) {
+                    // Character #3 (Polearm) Validation — Damage Source Metadata: ghi lại NGAY ĐẦU
+                    // hàm, TRƯỚC khi trừ HP (đúng yêu cầu implementation — Reactive Skill polling
+                    // enemy.hp ở FRAME SAU cần đọc đúng lastDamageSource của lần damage này).
+                    this.lastDamageSource = (impact && impact.source) ? impact.source : null;
+
+                    // `player` vẫn cần cho phần "báo động đồng đội cùng camp" bên dưới (kiểm tra
+                    // khoảng cách) — KHÔNG còn dùng để tính damage (xem giải thích Talent System v2
+                    // ở comment phía trên).
                     const player = window.player;
-                    // Bước 2+3: lấy ATK người tấn công (player.stats.atk) + DEF mục tiêu (this.stats.def).
-                    // Bước 4: tính Final Damage theo công thức chuẩn.
-                    const finalDamage = window.calculateFinalDamage(player.stats.atk, this.stats.def, multiplier);
+                    const finalDamage = Math.max(0, Math.round(damage || 0));
                     // Bước 5: trừ HP mục tiêu (Math.max(0, ...) đảm bảo không bao giờ xuống âm).
                     this.hp = Math.max(0, this.hp - finalDamage);
 
@@ -428,12 +632,70 @@
                     this.updateHpBarVisual();
                     this.hpBarVisibleTimer = 3.0;
 
-                    // --- Hiệu ứng phụ không thuộc 8 bước chuẩn hóa (flash trắng, knockback) — giữ
-                    // nguyên hành vi combat feel đã có từ trước v0.7, không phải 1 phần Core Stats. ---
+                    // --- Hiệu ứng phụ không thuộc 8 bước chuẩn hóa (flash trắng, knockback, hit
+                    // reaction) — giữ nguyên hành vi combat feel đã có từ trước v0.7, không phải 1
+                    // phần Core Stats. ---
                     this.flashTimer = 0.18;
                     this.bodyMesh.material = isHydro ? this.hydroFlashMaterial : this.flashMaterial;
-                    const force = this.isLarge ? window.COMBAT_FEEL_CONFIG.enemyRecoilForce.large : window.COMBAT_FEEL_CONFIG.enemyRecoilForce.normal;
-                    this.knockback.copy(direction).normalize().multiplyScalar(force);
+
+                    // Hit Reaction / Poise System v1: nếu impact được truyền -> dùng resolveHitReaction()
+                    // (combat.js) để tính knockback + stagger + interrupt, THAY THẾ hoàn toàn
+                    // enemyRecoilForce.normal/large hard-code cũ. Nếu KHÔNG truyền impact (lời gọi cũ
+                    // chưa cập nhật) -> giữ NGUYÊN hành vi knockback cũ, không stagger/interrupt gì cả
+                    // (an toàn ngược tuyệt đối).
+                    if (impact && window.resolveHitReaction) {
+                        const reaction = window.resolveHitReaction(impact, this.poise);
+                        this.knockback.copy(direction).normalize().multiplyScalar(reaction.knockbackForce);
+
+                        // Interrupt — Phase 4 (Combat Hit Reaction 2.0): MỞ RỘNG whitelist so với
+                        // bản trước (trước đây CHỈ attack_prep/attack_jump). Yêu cầu đã chốt: thêm
+                        // 'prep' và 'jump' — 2 state của hành vi nhảy LANG THANG bình thường (KHÔNG
+                        // nhắm vào player) cũng phải bị gián đoạn được nếu impact đủ mạnh, đúng ví dụ
+                        // gốc "Slime đang jump mà nhận impact đủ mạnh, không được tiếp tục jump như
+                        // chưa có gì xảy ra". 'chase' CỐ Ý KHÔNG nằm trong whitelist (yêu cầu đã chốt
+                        // "không bắt buộc interrupt chase; chase chỉ nhận knockback/recoil") — vì
+                        // 'chase' tự thân không di chuyển slime (chỉ đếm cooldown chờ chuyển sang
+                        // prep/attack_prep, xem update()), gián đoạn state này không có ý nghĩa hành
+                        // vi rõ rệt, chỉ cần knockback là đủ cảm nhận được.
+                        //
+                        // enterHitReactionState() (helper mới, xem định nghĩa cạnh enterIdleState())
+                        // THAY THẾ hoàn toàn enterIdleState() ở nhánh này — chuyển sang state
+                        // 'hitReaction' riêng (KHÔNG phải 'idle' như bản cũ) để update() có thể khóa
+                        // state machine đúng suốt staggerDuration (xem khối xử lý 'hitReaction' mới
+                        // trong update() bên dưới) — bản cũ nhảy thẳng về 'idle' khiến slime có thể
+                        // NGAY LẬP TỨC tái phát hiện player và chuyển sang 'prep' ở đúng frame kế
+                        // tiếp, không thực sự "bị khựng lại" trong lúc stagger. Khi interrupt xảy ra,
+                        // enterHitReactionState() TỰ set hitReactionTimer (không set trùng ở đây); khi
+                        // KHÔNG interrupt (VD đang 'chase', hoặc impact chưa đủ mạnh), timer vẫn được
+                        // set ở nhánh else bên dưới để giữ nguyên mục đích hiển thị/debug ban đầu.
+                        //
+                        // Phase 4 — Launch Hit Reaction: thêm 'hitReaction' vào whitelist, NHƯNG CHỈ
+                        // khi reaction.level === 'launch' (điều kiện riêng, tách khỏi whitelist chung ở
+                        // trên bằng toán tử ||) — đúng yêu cầu đã chốt "Cho phép hitReaction → launch
+                        // interrupt. Không cho stagger thường liên tục override nhau." Nghĩa là: nếu
+                        // slime đang stagger (state 'hitReaction') vì 1 đòn light/medium/heavy TRƯỚC,
+                        // và ăn tiếp 1 đòn light/medium/heavy KHÁC trong lúc đang stagger, đòn mới
+                        // KHÔNG được phép ngắt lại (rơi vào nhánh else, chỉ cập nhật hitReactionTimer
+                        // hiển thị, không gọi lại enterHitReactionState — tránh 'hitReaction' bị
+                        // stagger-lock liên hoàn vô thời hạn bởi các đòn yếu). CHỈ đòn tiếp theo đạt
+                        // đúng level 'launch' mới được phép ngắt 1 slime đang 'hitReaction' — khớp
+                        // đúng ví dụ "Launch #1 → airborne → Launch #2 → vertical velocity = Launch
+                        // #2" trong yêu cầu, và enterHitReactionState() (xem định nghĩa ở trên) đã tự
+                        // xử lý đúng việc SET (không cộng dồn) jumpVelocityY cho case gọi lại này.
+                        const canInterruptState =
+                            this.state === 'attack_prep' || this.state === 'attack_jump' ||
+                            this.state === 'prep' || this.state === 'jump' ||
+                            (this.state === 'hitReaction' && reaction.level === 'launch');
+
+                        if (reaction.interrupt && canInterruptState) {
+                            enterHitReactionState(this, reaction, direction);
+                        } else {
+                            this.hitReactionTimer = reaction.staggerDuration;
+                        }
+                    } else {
+                        const force = this.isLarge ? window.COMBAT_FEEL_CONFIG.enemyRecoilForce.large : window.COMBAT_FEEL_CONFIG.enemyRecoilForce.normal;
+                        this.knockback.copy(direction).normalize().multiplyScalar(force);
+                    }
 
                     // --- BÁO ĐỘNG ĐỒNG ĐỘI CÙNG CAMP (không thuộc 8 bước chuẩn hóa — hành vi AI) ---
                     // Chạy TRƯỚC bước 8 (kiểm tra chết) bên dưới — 1 đòn đánh dù có hạ gục slime này
@@ -487,6 +749,14 @@
                         if (this.flashTimer <= 0) this.bodyMesh.material = this.defaultMaterial;
                     }
 
+                    // Hit Reaction / Poise System v1 — Phase 4 (Combat Hit Reaction 2.0): khác bản
+                    // trước (comment cũ nói "KHÔNG khoá thêm hành vi AI nào"), TỪ PHASE 4 timer này
+                    // THỰC SỰ khóa state machine trong lúc this.state === 'hitReaction' (xem khối xử
+                    // lý riêng bên dưới, đặt TRƯỚC state machine grounded/airborne chính — giống cách
+                    // updateBehaviorMode() đã đặt trước, để đếm ngược luôn đúng nhịp mỗi frame bất kể
+                    // nhánh nào chạy sau đó).
+                    if (this.hitReactionTimer > 0) this.hitReactionTimer -= dt;
+
                     // Behavior Mode (đứng yên vs trườn khi idle) — tick ở ĐÂY, TRƯỚC state machine,
                     // độc lập hoàn toàn với state hiện tại (idle/jump/chase/...). Xem comment đầy đủ ở
                     // SLIME_WANDER_CONFIG.behaviorModeDuration và updateBehaviorMode() phía trên class.
@@ -498,6 +768,39 @@
                     const playerIsTargetable = !player.isDead;
 
                     const distToPlayer = this.position.distanceTo(player.position);
+
+                    // ============================================================
+                    // Elemental Skill Validation — DECOY TARGET PRIORITY (spec mục 3-5)
+                    // ============================================================
+                    // LIMITATION KIẾN TRÚC ĐÃ XÁC NHẬN VỚI NGƯỜI DÙNG: state machine của Slime hard-
+                    // code `player`/`player.position` trực tiếp ở nhiều điểm (không có field
+                    // `this.target` trừu tượng) — thay vì viết lại toàn bộ state machine, patch TỐI
+                    // THIỂU: tính 1 LẦN DUY NHẤT "mục tiêu hiệu lực" (targetPos/targetIsDecoy) ngay ở
+                    // đây, TRƯỚC mọi logic playerDetected/withinChaseRange bên dưới — các điểm dùng
+                    // player.position để QUYẾT ĐỊNH HƯỚNG DI CHUYỂN/TẤN CÔNG (không phải hiển thị HP
+                    // bar, vốn luôn phải theo player thật) đọc qua targetPos thay vì player.position
+                    // trực tiếp. distToPlayer (dòng trên) GIỮ NGUYÊN Ý NGHĨA GỐC (chỉ dùng cho HP bar
+                    // + isAlerted/loseRadius — logic đó vẫn nói về player thật, spec không yêu cầu đổi).
+                    //
+                    // Taunt/Attraction (spec mục 3): "Enemy nằm trong phạm vi hợp lệ sẽ ưu tiên Decoy
+                    // — KHÔNG teleport, KHÔNG kéo bằng physics/force, Enemy vẫn dùng movement/AI bình
+                    // thường để di chuyển tới Decoy" — đạt được TỰ NHIÊN bằng cách chỉ đổi "vị trí mà
+                    // AI nhắm tới" (targetPos), state machine di chuyển/tấn công phía dưới HOÀN TOÀN
+                    // KHÔNG ĐỔI logic (vẫn chase/prep/jump y hệt cũ, chỉ là bây giờ hướng tới
+                    // targetPos thay vì player.position).
+                    //
+                    // Spec mục 5: "Nếu Player tấn công Enemy trong lúc bị thu hút -> Enemy vẫn tiếp
+                    // tục ưu tiên Decoy" — ĐẠT ĐƯỢC TỰ NHIÊN vì điều kiện dưới đây CHỈ phụ thuộc
+                    // distance-to-Decoy, KHÔNG có logic nào "quay lại player khi bị player đánh" — bị
+                    // đánh chỉ set isAlerted (nếu trước đó chưa alert), không ảnh hưởng targetIsDecoy.
+                    let targetPos = player.position;
+                    let targetIsDecoy = false;
+                    const decoy = window.activeDecoy;
+                    if (decoy && decoy.active && this.position.distanceTo(decoy.position) <= decoy.attractionRadius) {
+                        targetPos = decoy.position;
+                        targetIsDecoy = true;
+                    }
+                    const distToTarget = this.position.distanceTo(targetPos);
 
                     // --- ENEMY HP BAR: hiện/ẩn (v0.7) ---
                     // Hiện khi (a) vừa bị đánh gần đây (hpBarVisibleTimer > 0, set = 3.0 trong
@@ -529,7 +832,14 @@
                         }
                         // playerDetected: điều kiện để BẮT ĐẦU phát hiện player từ trạng thái nghỉ
                         // (idle) — dùng detectRadius (hẹp).
-                        const playerDetected = playerIsTargetable && (this.isAlerted || distToPlayer < this.detectRadius);
+                        //
+                        // Elemental Skill Validation — targetIsDecoy === true nghĩa là slime đang nằm
+                        // trong attractionRadius của Decoy (đã tính ở trên) — Taunt LUÔN "phát hiện"
+                        // ngay lập tức, KHÔNG cần qua detectRadius/isAlerted (đó là điều kiện phát
+                        // hiện PLAYER bằng "giác quan" tự nhiên, khác bản chất với việc bị Decoy chủ
+                        // động thu hút sự chú ý — spec mục 3 "Enemy trong phạm vi -> ưu tiên Decoy",
+                        // không có điều kiện "phải phát hiện trước").
+                        const playerDetected = targetIsDecoy || (playerIsTargetable && (this.isAlerted || distToPlayer < this.detectRadius));
                         // withinChaseRange: điều kiện để TIẾP TỤC nhắm vào player khi đã ở giữa
                         // một chuỗi đuổi (prep/land sau khi vừa chase).
                         // - Nếu ĐANG bị báo động (isAlerted): dùng loseRadius — cho phép đuổi dai
@@ -539,8 +849,28 @@
                         //   khoan nhượng nào cả. Ra khỏi detectRadius dù chỉ 1 chút là hủy chase
                         //   ngay, quay lại idle.
                         const effectiveLoseRadius = this.isAlerted ? this.loseRadius : this.detectRadius;
-                        const withinChaseRange = playerIsTargetable && distToPlayer <= effectiveLoseRadius;
-                        if (this.position.y > currentGroundY + (this.height / 2) + 0.05) {
+                        // Elemental Skill Validation — targetIsDecoy === true: tiếp tục đuổi Decoy MIỄN
+                        // LÀ còn trong attractionRadius (đã đảm bảo bởi chính điều kiện gán targetIsDecoy
+                        // ở trên, tính LẠI mỗi frame) — không áp effectiveLoseRadius (đó là ngưỡng riêng
+                        // cho việc "bỏ cuộc đuổi player", không áp dụng cho Decoy).
+                        const withinChaseRange = targetIsDecoy || (playerIsTargetable && distToPlayer <= effectiveLoseRadius);
+                        // Hit Reaction / Poise System v1 — Phase 4: BẢO VỆ this.state === 'hitReaction'
+                        // khỏi bị khối detection bên dưới ghi đè thành 'jump'. Khối gốc (else nhánh
+                        // dưới) tự ý set this.state = 'jump' bất cứ khi nào position.y cao hơn ground
+                        // + 0.05 (VD do vừa bị đẩy lên nhẹ bởi knockback theo phương ngang gây chênh Y
+                        // khi resolveStaticCollisions chạy) — nếu để lọt qua, slime đang stagger sẽ bị
+                        // đổi nhầm sang 'jump' giữa chừng, phá khóa state machine mà Phase 4 yêu cầu
+                        // ("trong thời gian hitReactionTimer > 0, enemy không được tự chuyển sang
+                        // prep/chase/attack_*"). Nhánh này SKIP HẲN khối detection y-position gốc khi
+                        // đang hitReaction — giữ nguyên isGrounded hiện tại (đã chốt đúng lúc
+                        // enterHitReactionState() được gọi), không có tác dụng phụ nào khác.
+                        if (this.state === 'hitReaction') {
+                            // Không làm gì thêm ở đây — chỉ đảm bảo state/isGrounded không bị đổi bởi
+                            // khối detection phía trên. Toàn bộ xử lý đếm ngược + chuyển state khi hết
+                            // hitReactionTimer nằm ở khối riêng ngay bên dưới (sau chuỗi if/else state
+                            // machine chính) để dùng chung được cho cả trường hợp grounded lẫn airborne
+                            // mà không phải viết trùng logic 2 lần.
+                        } else if (this.position.y > currentGroundY + (this.height / 2) + 0.05) {
                             this.isGrounded = false;
                             this.state = 'jump';
                             this.jumpVelocity.set(0, 0, 0);
@@ -583,11 +913,14 @@
                             // ra khỏi detectRadius là hủy chase ngay. Nếu ĐANG isAlerted (vừa bị đánh),
                             // ngưỡng nới rộng ra loseRadius (xem effectiveLoseRadius phía trên).
                             if (!withinChaseRange) { enterIdleState(this); this.isEngagingPlayer = false; }
-                            else if (distToPlayer <= this.attackRange) {
+                            else if (distToTarget <= this.attackRange) {
                                 // Đủ gần — khóa vị trí+hướng mục tiêu và bắt đầu chuẩn bị lao vào
                                 this.state = 'attack_prep';
                                 this.stateTimer = this.attackTelegraphDuration;
-                                this.attackTargetPos.copy(player.position);
+                                // Elemental Skill Validation — targetPos (Decoy hoặc player, tính ở đầu
+                                // update()) thay vì player.position trực tiếp — đây là 1 trong các điểm
+                                // "quyết định AI behavior" cần patch theo limitation đã xác nhận.
+                                this.attackTargetPos.copy(targetPos);
                             } else {
                                 this.stateTimer -= dt;
                                 if (this.stateTimer <= 0) { this.state = 'prep'; this.stateTimer = randomInRange(SLIME_WANDER_CONFIG.prepDuration); }
@@ -620,7 +953,8 @@
                             if (this.stateTimer <= 0) {
                                 this.state = 'jump'; this.isGrounded = false;
                                 if (withinChaseRange) {
-                                    const dir = new THREE.Vector3().subVectors(player.position, this.position);
+                                    // Elemental Skill Validation — targetPos thay vì player.position.
+                                    const dir = new THREE.Vector3().subVectors(targetPos, this.position);
                                     dir.y = 0; dir.normalize();
                                     this.jumpVelocity.copy(dir).multiplyScalar(this.chaseSpeed); this.jumpVelocityY = this.jumpPowerY; 
                                     this.isEngagingPlayer = true;
@@ -644,40 +978,87 @@
                                 this.state = 'chase'; this.stateTimer = this.chaseCooldown;
                             }
                         }
+                        else if (this.state === 'hitReaction') {
+                            // Hit Reaction / Poise System v1 — Phase 4: nhánh xử lý khi slime bị
+                            // interrupt LÚC ĐANG GROUNDED (đến từ state 'prep', xem whitelist trong
+                            // takeDamage()). Trường hợp interrupt lúc ĐANG AIRBORNE ('jump'/
+                            // 'attack_jump') KHÔNG cần xử lý ở đây — enterHitReactionState() giữ
+                            // isGrounded=false, nên slime rơi vào nhánh airborne (khối `else` ở đầu
+                            // update(), physics gravity) chứ không lọt vào khối `if (this.isGrounded)`
+                            // này; landing logic CÓ SẴN ở đó (xem "if (this.position.y <= groundY...")
+                            // sẽ tự chuyển 'hitReaction' -> 'land' khi chạm đất (vì chỉ check riêng
+                            // this.state === 'attack_jump' để vào 'attack_land', mọi state khác kể cả
+                            // 'hitReaction' đều rơi vào nhánh else -> 'land') — đúng ý "chuyển sang
+                            // trạng thái phù hợp để rơi/land", không cần sửa thêm gì ở khối physics.
+                            //
+                            // Ở đây CHỈ xử lý case grounded: đếm hitReactionTimer (đã đếm ở khối đầu
+                            // update(), xem "if (this.hitReactionTimer > 0) this.hitReactionTimer -=
+                            // dt;"), khi hết hạn -> tái dùng ĐÚNG logic chuyển tiếp đã có ở 'land'
+                            // (dòng ngay phía trên: withinChaseRange ? 'chase' : enterIdleState) thay
+                            // vì bịa ra rule mới — giữ nguyên tinh thần "tái sử dụng transition hiện
+                            // có thay vì tạo state machine thứ hai" đã chốt.
+                            if (this.hitReactionTimer <= 0) {
+                                if (withinChaseRange) { this.state = 'chase'; this.stateTimer = this.chaseCooldown; this.isEngagingPlayer = true; }
+                                else { enterIdleState(this); this.isEngagingPlayer = false; }
+                            }
+                        }
                     } else {
                         this.jumpVelocityY -= player.gravity * dt;
                         this.position.x += this.jumpVelocity.x * dt; this.position.y += this.jumpVelocityY * dt; this.position.z += this.jumpVelocity.z * dt;
                         if (this.jumpVelocity.lengthSq() > 0.01) { const angle = Math.atan2(this.jumpVelocity.x, this.jumpVelocity.z); this.mesh.rotation.y = angle; }
                         window.resolveStaticCollisions(this, this.width, this.height, this.depth, dt);
 
-                        // Trong lúc lao vào (attack_jump), kiểm tra va chạm với player NGAY KHI ĐANG BAY,
-                        // không cần đợi tiếp đất — đây chính là hành vi "tông vào" gây damage.
-                        if (playerIsTargetable && this.state === 'attack_jump' && !this.player_hasBeenHitThisAttack) {
-                            const distNow = this.position.distanceTo(player.position);
-                            if (distNow <= this.attackHitRange && player.invulnTimer <= 0) {
-                                this.player_hasBeenHitThisAttack = true;
-                                // Pre-Alpha v0.7 — Core Stats: Final Damage tính qua calculateFinalDamage()
-                                // (ATK của Slime, DEF của player), KHÔNG còn random thô theo khoảng
-                                // minAttackDamage/maxAttackDamage như trước v0.7. multiplier=1 vì Slime
-                                // chỉ có 1 loại đòn tấn công (không có hệ số riêng theo loại đòn như
-                                // player.attack.melee/plunge/burst/hydroProjectile).
-                                const dmg = window.calculateFinalDamage(this.stats.atk, player.stats.def);
-                                player.hp = Math.max(0, player.hp - dmg); player.invulnTimer = 0.8;
-                                window.triggerDamageFlash(); sfx.playHit();
-                                // Damage Number khi PLAYER nhận sát thương (v0.7 mục 3) — cùng hàm
-                                // dùng cho Enemy, chỉ khác điểm xuất phát (trên đầu player thay vì
-                                // enemy).
-                                if (window.spawnDamageNumber) {
-                                    const numberOrigin = player.position.clone();
-                                    numberOrigin.y += player.height * 0.75;
-                                    window.spawnDamageNumber(numberOrigin, dmg);
+                        // Trong lúc lao vào (attack_jump), kiểm tra va chạm với TARGET (player hoặc
+                        // Decoy nếu đang bị taunt) NGAY KHI ĐANG BAY, không cần đợi tiếp đất — đây
+                        // chính là hành vi "tông vào" gây damage.
+                        //
+                        // Elemental Skill Validation — DISPATCH theo targetIsDecoy (spec mục 6: "Decoy
+                        // có HP riêng, Enemy có thể tấn công Decoy; khi HP<=0 -> Explosion"). Khi đang
+                        // bị Decoy taunt, va chạm gây damage vào Decoy.takeDamage() THAY VÌ player.hp
+                        // — nhánh player HOÀN TOÀN KHÔNG CHẠY trong trường hợp này (đúng spec mục 5:
+                        // "Enemy vẫn tiếp tục ưu tiên Decoy" — không có logic nào lỡ tay gây damage cả
+                        // 2 phía cùng lúc). player_hasBeenHitThisAttack DÙNG CHUNG cho cả 2 nhánh (đúng
+                        // ý nghĩa gốc: "đã trúng mục tiêu trong lượt lao vào này", không quan trọng
+                        // mục tiêu là ai).
+                        if (this.state === 'attack_jump' && !this.player_hasBeenHitThisAttack) {
+                            if (targetIsDecoy) {
+                                const distNow = this.position.distanceTo(decoy.position);
+                                if (distNow <= this.attackHitRange) {
+                                    this.player_hasBeenHitThisAttack = true;
+                                    // Spec mục 6: Decoy HP tuyến tính, KHÔNG qua calculateFinalDamage()/DEF
+                                    // (Decoy không có stats.def — spec không yêu cầu Decoy có DEF mitigation,
+                                    // chỉ cần "HP riêng, configurable"). Dùng THẲNG this.stats.atk làm damage.
+                                    decoy.takeDamage(this.stats.atk);
+                                    sfx.playHit();
+                                    cameraState.shakeTimer = 0.15; cameraState.shakeIntensity = 0.2;
                                 }
-                                cameraState.shakeTimer = 0.25; cameraState.shakeIntensity = 0.35;
-                                // Stagger nhẹ ~0.1s: chỉ là hiệu ứng knockback nhẹ, không khóa input người chơi
-                                const pushDir = new THREE.Vector3().subVectors(player.position, this.position); pushDir.y = 0;
-                                if (pushDir.lengthSq() > 0.0001) player.velocity.add(pushDir.normalize().multiplyScalar(4.0));
-                                player.staggerTimer = 0.1;
-                                if (player.hp <= 0) window.enterDeadState('combat');
+                            } else if (playerIsTargetable) {
+                                const distNow = this.position.distanceTo(player.position);
+                                if (distNow <= this.attackHitRange && player.invulnTimer <= 0) {
+                                    this.player_hasBeenHitThisAttack = true;
+                                    // Pre-Alpha v0.7 — Core Stats: Final Damage tính qua calculateFinalDamage()
+                                    // (ATK của Slime, DEF của player), KHÔNG còn random thô theo khoảng
+                                    // minAttackDamage/maxAttackDamage như trước v0.7. multiplier=1 vì Slime
+                                    // chỉ có 1 loại đòn tấn công (không có hệ số riêng theo loại đòn như
+                                    // player.attack.melee/plunge/burst/hydroProjectile).
+                                    const dmg = window.calculateFinalDamage(this.stats.atk, player.stats.def);
+                                    player.hp = Math.max(0, player.hp - dmg); player.invulnTimer = 0.8;
+                                    window.triggerDamageFlash(); sfx.playHit();
+                                    // Damage Number khi PLAYER nhận sát thương (v0.7 mục 3) — cùng hàm
+                                    // dùng cho Enemy, chỉ khác điểm xuất phát (trên đầu player thay vì
+                                    // enemy).
+                                    if (window.spawnDamageNumber) {
+                                        const numberOrigin = player.position.clone();
+                                        numberOrigin.y += player.height * 0.75;
+                                        window.spawnDamageNumber(numberOrigin, dmg);
+                                    }
+                                    cameraState.shakeTimer = 0.25; cameraState.shakeIntensity = 0.35;
+                                    // Stagger nhẹ ~0.1s: chỉ là hiệu ứng knockback nhẹ, không khóa input người chơi
+                                    const pushDir = new THREE.Vector3().subVectors(player.position, this.position); pushDir.y = 0;
+                                    if (pushDir.lengthSq() > 0.0001) player.velocity.add(pushDir.normalize().multiplyScalar(4.0));
+                                    player.staggerTimer = 0.1;
+                                    if (player.hp <= 0) window.enterDeadState('combat');
+                                }
                             }
                         }
 
@@ -713,7 +1094,15 @@
 
                     if (this.knockback.lengthSq() > 0.01) {
                         this.position.addScaledVector(this.knockback, dt);
-                        this.knockback.multiplyScalar(Math.exp(-12 * dt)); 
+                        // Reaction Tuning — Launch Trajectory Consistency: dùng this.knockbackDecayRate
+                        // (mặc định 12, riêng 'launch' = 3, set tại enterHitReactionState()) thay vì
+                        // hằng số cứng 12 — để thành phần NGANG (knockback) decay đồng bộ với thành
+                        // phần DỌC (jumpVelocityY, chịu gravity xuyên suốt staggerDuration) khi đang
+                        // launch, tránh cảm giác "đẩy ngang trước, rơi dọc sau" (xem giải thích đầy đủ
+                        // tại field knockbackDecayRate ở constructor). Với mọi reaction khác
+                        // (none/light/medium/heavy), knockbackDecayRate luôn = 12 → hành vi decay
+                        // GIỮ NGUYÊN 100% như trước, không đổi cảm giác stagger hiện có.
+                        this.knockback.multiplyScalar(Math.exp(-this.knockbackDecayRate * dt));
                         window.resolveStaticCollisions(this, this.width, this.height, this.depth, dt);
                         if (this.isGrounded) {
                             this.alignToGround();
