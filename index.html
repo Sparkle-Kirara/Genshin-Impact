@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Genshin Impact Pre-Alpha v0.9.5 - Ascension</title>
+    <title>Genshin Impact Alpha v1.0</title>
     <!-- FLAG: OPENING / TITLE SCREEN ĐANG HIỂN THỊ (Pre-Alpha v0.9) -->
     <!-- Đặt SỚM NHẤT CÓ THỂ (đầu <head>, trước MỌI script khác) — độc lập với thứ tự load của 8 file
          game logic (01-08, có ràng buộc thứ tự nghiêm ngặt riêng, xem comment gần các thẻ <script
@@ -243,6 +243,24 @@
             <div class="absolute right-0 top-1/2 h-0.5 w-2.5 -translate-y-1/2 bg-cyan-300/80"></div>
         </div>
     </div>
+
+    <!-- Character #2 (Bow) Validation — CROSSHAIR RIÊNG cho Bow Charged Attack (spec mục 3: "Hiển
+         thị Bow-specific crosshair/reticle"). TÁCH biệt hoàn toàn DOM element khỏi
+         #skill-aim-crosshair ở trên (không tái dùng chung 1 element đổi màu bằng JS — mỗi loại có
+         cấu trúc HTML/style riêng, dễ chỉnh sửa độc lập sau này) nhưng dùng ĐÚNG CÙNG CƠ CHẾ toggle
+         (opacity-0/scale-75 <-> opacity-100/scale-100, transition-all duration-150) và ĐÚNG CÙNG vị
+         trí cố định giữa màn hình (inset-0 flex items-center justify-center) — xem
+         setSkillAimUIVisible(visible, kind) trong ui.js, được gọi từ startSkillAim()/endSkillAim()
+         (combat.js) dựa theo player.isBowChargedAiming. Style: hình thoi/chữ thập đơn giản màu hổ
+         phách (amber) thay vì vòng tròn cyan — phân biệt trực quan Bow Charged Attack với Elemental
+         Skill Aim Mode, KHÔNG cần phức tạp (yêu cầu đã xác nhận "không cần đẹp/phức tạp"). -->
+    <div id="bow-aim-crosshair" class="absolute inset-0 flex items-center justify-center pointer-events-none z-40 opacity-0 scale-75 transition-all duration-150">
+        <div class="relative w-12 h-12 rotate-45">
+            <div class="absolute inset-0 border-2 border-amber-300/70" style="box-shadow: 0 0 12px rgba(251,191,36,0.5);"></div>
+            <div class="absolute top-1/2 left-1/2 w-1.5 h-1.5 -translate-x-1/2 -translate-y-1/2 bg-amber-200" style="box-shadow: 0 0 8px rgba(252,211,77,0.9);"></div>
+        </div>
+    </div>
+
 
     <!-- HIỆU ỨNG ĐUỐI NƯỚC (DROWN FADE SCREEN) -->
     <!-- MÀN HÌNH TỬ VONG (DEATH SCREEN) — style Genshin Impact -->
@@ -485,7 +503,7 @@
                 <!-- Footer Stats / UID -->
                 <div class="p-4 bg-[#0a0811] border-t border-[#1b172d] flex items-center justify-between text-[11px] text-[#6e6884] font-mono">
                     <span>UID: 810962002</span>
-                    <span>pre-alpha v0.9.5</span>
+                    <span>alpha v1.0</span>
                 </div>
             </div>
 
@@ -1138,6 +1156,12 @@
          dùng chung (player, scene, enemies, campStates...) vẫn là closure top-level chia sẻ NGUYÊN
          VẸN qua toàn bộ 8 file này, y hệt hành vi khi còn là 1 file game.js duy nhất. Đổi thứ tự
          hoặc bỏ sót 1 file sẽ gây ReferenceError do tham chiếu biến chưa được khai báo. -->
+    <!-- Alpha v1.0 — Character System: Character Database + Skill Library. Object liệt kê thuần
+         dữ liệu, không đọc biến global nào lúc parse — nhưng PHẢI load trước 02 (initParty() gọi
+         CHARACTER_ROSTER khi RUNTIME, không phải lúc parse, nên thứ tự này không bắt buộc về mặt kỹ
+         thuật, nhưng đặt trước để rõ ràng và tránh nhầm lẫn khi đọc code). -->
+    <script src="scripts/game/10-character-roster.js"></script>
+    <script src="scripts/game/11-character-skills.js"></script>
     <script src="scripts/game/01-entities-quest-inventory-chest.js"></script>
     <script src="scripts/game/02-collision-and-stats-core.js"></script>
     <script src="scripts/game/03-skillstate-camera-collision-helpers.js"></script>
@@ -1146,6 +1170,21 @@
     <script src="scripts/game/06-camps-save-system.js"></script>
     <script src="scripts/game/07-input-handlers.js"></script>
     <script src="scripts/game/08-physics-combat-camera-loop.js"></script>
+
+    <!-- Alpha v1.0 — Character System: Character Engine. PHẢI load sau 02/08 (dùng player, scene,
+         enemies, obstacles, AABB, sfx...) và TRƯỚC combat.js (combat.js gọi executeCharacterSkill/
+         executeSkillTickEffect/executeCharacterBurst). -->
+    <script src="scripts/game/09-character-system.js"></script>
+
+    <!-- Core Energy + Elemental Particle System v1: PHẢI load SAU 02 (dùng partyState/
+         activeCharacterIndex/getActiveCharacterData) và SAU 09 (dùng scene/player, cùng nhóm
+         "entity trong World" như activeEffects) — và TRƯỚC combat.js/09's usage sites gọi
+         EnergySystem.generateParticles()/updateParticles() (09-character-system.js đọc EnergySystem
+         tại RUNTIME trong runBeamEffect/updateSmallShotEffect/explodeDecoy, không phải lúc parse,
+         nên về mặt kỹ thuật thứ tự với 09 không bắt buộc, nhưng đặt ngay sau 09 để nhất quán nhóm
+         "Character System"). SKILL_LIBRARY (11-character-skills.js).energyGeneration đọc bởi file
+         09 — 11 đã load từ trước (dòng 1164) nên an toàn. -->
+    <script src="scripts/game/12-energy-system.js"></script>
 
     <!-- Script Combat (Plunge/Attack/Elemental Skill/Burst) — PHẢI load SAU game.js: dùng trực tiếp
          nhiều biến/hằng số khai báo trong game.js (player, scene, camera, particles, enemies, sfx,
@@ -2017,7 +2056,7 @@
                 update(dt, inCombatNow) {
                     this._updateFade(dt);
 
-                    console.log(player.position);
+                    //console.log(player.position);
 
                     if (inCombatNow && !this.inCombat) {
                         this.inCombat = true;
@@ -2092,5 +2131,10 @@
     eruda.init();
 </script>
 </body>
+</html>
+ml>
+>
+ml>
+body>
 </html>
 ml>
