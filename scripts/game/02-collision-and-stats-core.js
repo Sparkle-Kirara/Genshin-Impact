@@ -60,7 +60,6 @@
             const enemies = window.enemies = [];
             const particles = window.particles = [];
             const ghostTrails = window.ghostTrails = [];
-            const activeProjectiles = window.activeProjectiles = [];
             const energyParticles = window.energyParticles = [];
             // Hiệu ứng hình ảnh của Pressure Shot (instant beam) — KHÔNG di chuyển, chỉ fade rồi tự hủy.
             // Tách riêng khỏi activeProjectiles vì không có logic bay/va chạm, chỉ là visual thuần túy.
@@ -229,16 +228,22 @@
             };
             window.COMBAT_CONSTANTS = COMBAT_CONSTANTS;
 
-            // calculateFinalDamage(atk, def, multiplier = 1):
-            //   Final Damage = (ATK × multiplier) × DEFENSE_CONSTANT / (DEFENSE_CONSTANT + DEF)
+            // calculateFinalDamage(statValue, def, multiplier = 1):
+            //   Final Damage = (statValue × multiplier) × DEFENSE_CONSTANT / (DEFENSE_CONSTANT + DEF)
             //
-            //   atk: chỉ số ATK của bên gây sát thương (player.stats.atk hoặc enemy.stats.atk).
+            //   Talent System v1 — Ý NGHĨA tham số đầu tiên MỞ RỘNG: trước đây LUÔN là ATK
+            //   (player.stats.atk/enemy.stats.atk) vì mọi damage chỉ scale theo ATK. Từ Talent
+            //   System v1, statValue là GIÁ TRỊ CỦA STAT ĐƯỢC SCALING (đọc qua getTalentMultiplier()
+            //   trong combat.js, có thể là ATK/HP/DEF tùy khai báo talents.*.scaling.stat trong
+            //   CHARACTER_ROSTER — KHÔNG hard-code luôn là ATK nữa). Enemy melee thường (Slime đánh
+            //   Player) và mọi lời gọi CŨ vẫn truyền enemy.stats.atk/player.stats.atk như trước —
+            //   HÀNH VI KHÔNG ĐỔI, chỉ Ý NGHĨA tên tham số tổng quát hơn. Công thức/logic bên dưới
+            //   GIỮ NGUYÊN 100%, không đổi 1 dòng.
+            //
             //   def: chỉ số DEF của bên nhận sát thương.
-            //   multiplier: hệ số riêng theo LOẠI đòn đánh (VD melee=1, plunge=3, burst=4 — xem
-            //               player.attack.* bên dưới) — KHÔNG phải "damage points" độc lập như trước
-            //               v0.7, mà là hệ số nhân lên ATK gốc trước khi đưa vào công thức giảm theo
-            //               DEF. Mặc định 1 cho các trường hợp không có multiplier riêng (VD đòn đánh
-            //               thường của Enemy lên Player).
+            //   multiplier: hệ số riêng theo LOẠI đòn đánh — GIỮ Ý NGHĨA CŨ (hệ số nhân lên statValue
+            //               trước khi đưa vào công thức giảm theo DEF). Mặc định 1 cho các trường hợp
+            //               không có multiplier riêng (VD đòn đánh thường của Enemy lên Player).
             //
             //   Phòng vệ: DEF âm (chưa từng xảy ra, nhưng debuff tương lai có thể tạo ra) được clamp
             //   về 0 để mẫu số không bao giờ <= 0 (tránh chia cho 0 hoặc âm — kết quả càng âm DEF thì
@@ -351,8 +356,41 @@
                 // Hệ số nhân theo LOẠI đòn đánh (multiplier trong calculateFinalDamage) — KHÔNG còn
                 // là "damage points" độc lập như trước v0.7. Final Damage thực tế của 1 đòn melee =
                 // calculateFinalDamage(player.stats.atk, enemy.stats.def, player.attack.melee).
-                attack: { melee: 1, plunge: 2, burst: 2.5, hydroProjectile: 1.5 },
-                energy: 0, maxEnergy: 50, skillHitCount: 0,
+                // Alpha v1.0 — Character System: "hydroProjectile" đổi thành "skill" — hệ số nhân
+                // TỔNG QUÁT cho Elemental Skill của BẤT KỲ nhân vật/nguyên tố nào (đọc bởi Character
+                // Engine, xem 09-character-system.js), không còn hard-code riêng theo Hydro. Giá trị
+                // giữ nguyên 1.5, chỉ đổi tên field.
+                attack: { melee: 1, plunge: 2, burst: 2.5, skill: 1.5 },
+                // Energy System Fix v1: energy/maxEnergy đổi thành GETTER/SETTER trỏ vào
+                // partyState[activeCharacterIndex] — TRƯỚC ĐÂY là 2 field number CỐ ĐỊNH ngay trên
+                // player (dùng CHUNG cho cả party, không tách theo nhân vật — bug đã xác nhận: switch
+                // nhân vật vẫn giữ nguyên energy/maxEnergy của nhân vật trước, ví dụ Character #1 đầy
+                // 50/50 thì Character #2 cũng hiện 50/50 dù maxEnergy thật của #2 là 80). Từ v1: ĐÚNG
+                // pattern hp/maxHp phía trên — player.energy/maxEnergy đọc/ghi XUYÊN QUA vào đúng
+                // partyState[activeCharacterIndex].energy/maxEnergy, tự động đổi đúng số khi
+                // switchToCharacter() đổi activeCharacterIndex, KHÔNG cần copy tay ở nơi gọi
+                // (activeCharacterIndex/partyState khai báo PHÍA SAU trong cùng file — AN TOÀN vì
+                // getter chỉ evaluate lúc GỌI lúc gameplay, không phải lúc parse/khai báo object này).
+                get energy() { return partyState[activeCharacterIndex] ? partyState[activeCharacterIndex].energy : 0; },
+                set energy(v) { if (partyState[activeCharacterIndex]) partyState[activeCharacterIndex].energy = v; },
+                get maxEnergy() { return partyState[activeCharacterIndex] ? partyState[activeCharacterIndex].maxEnergy : 50; },
+                set maxEnergy(v) { if (partyState[activeCharacterIndex]) partyState[activeCharacterIndex].maxEnergy = v; },
+                skillHitCount: 0,
+
+                // Alpha v1.0 — Character System: nơi lưu effect Skill/Burst đang tồn tại (đạn bay,
+                // quả cầu nước...), thay thế activeProjectiles (đã xóa) + các field rời burstSphere/
+                // burstDir/burstDistTraveled/burstRotTimer/burstLifeTimer/burstHitCooldowns/
+                // burstStaggeredEnemies/isBursting (đã xóa, xem executeCharacterSkill/
+                // executeCharacterBurst trong 09-character-system.js). Mỗi slot là 1 MẢNG (không
+                // phải object đơn) vì 1 nhân vật có thể có nhiều effect cùng loại tồn tại song song
+                // (VD nhiều viên Small Shot bay cùng lúc trong lúc giữ Aim Mode).
+                // Character #2 (Bow) Validation — slot `arrows` MỚI, TÁCH RIÊNG khỏi skill/burst
+                // (Arrow không phải Skill/Burst — là Normal Attack/Charged Attack của vũ khí Bow).
+                // Cùng pattern mảng như skill/burst (nhiều mũi tên bay cùng lúc, VD Shot #3 bắn 2
+                // arrow gần như liên tiếp) — dùng CHUNG dispatcher updateActiveEffects() (file 09,
+                // MỞ RỘNG thêm slot 'arrows' vào vòng lặp ['skill','burst'] hiện có, KHÔNG tạo game
+                // loop / update function riêng).
+                activeEffects: { skill: [], burst: [], arrows: [] },
 
                 // --- EXP (v0.6 Wilderness, mục 8) — chỉ cộng dồn, CHƯA có hệ thống Level/tăng cấp.
                 // Xem REWARD_HANDLERS.exp — mọi nguồn EXP (Slime kill, Quest reward...) đều cộng qua
@@ -379,6 +417,18 @@
                 // và tự dừng khi bước sang active hoặc hết windup — không xoay liên tục kiểu Hard Lock-On.
                 softTargetLockY: null,
                 softTargetLerpSpeed: 0,
+                // Character #2 (Bow) Validation — softTargetEnemy: reference tới Enemy đã được chọn
+                // bởi TargetAssist.getNearestTarget() (02-collision-and-stats-core.js) lúc bắt đầu Bow
+                // Normal Attack — null nếu không có target hợp lệ. LƯU REFERENCE (không phải góc/
+                // hướng đã tính sẵn) vì spec mục 5 yêu cầu origin của aim direction phải là VỊ TRÍ
+                // SPAWN THẬT của từng arrow (có thể khác nhau giữa các arrow trong cùng Shot #3) —
+                // applyBowArrowSpawnTick() (combat.js) gọi TargetAssist.getAimDirection(spawnPosition,
+                // softTargetEnemy) MỖI LẦN spawn arrow, dùng ĐÚNG origin thật của arrow đó, nhưng vẫn
+                // là CÙNG 1 target đã chọn từ đầu shot (không re-tìm target giữa chừng — đúng spec
+                // mục 6 "Target Assist chỉ hỗ trợ hướng TẠI THỜI ĐIỂM attack", không homing). Set lại
+                // null sau khi shot đó bắt đầu 'active' xong hoặc khi trigger shot mới — reset ở
+                // triggerAttack() (combat.js), tương tự softTargetLockY.
+                softTargetEnemy: null,
 
                 // --- ATTACK LUNGE (bước tới khi tấn công, v0.9.2) ---
                 // Không phải Dash, không tự động lao thẳng vào địch — chỉ là 1 bước tiến ngắn, có
@@ -424,8 +474,13 @@
                 // "player.stamina <= 0 && player.isSwimming" trong updateStamina().
                 isStaminaExhausted: false,
 
-                isBursting: false, burstSphere: null, burstDir: new THREE.Vector3(),
-                burstDistTraveled: 0, burstRotTimer: 0,
+                // Alpha v1.0 — Character System: isBursting/burstSphere/burstDir/burstDistTraveled/
+                // burstRotTimer (và burstLifeTimer/burstHitCooldowns/burstStaggeredEnemies, vốn được
+                // updateBurst() cũ tự khởi tạo lười — không có dòng khai báo tường minh ở đây) đã bị
+                // XÓA — state tương ứng giờ nằm trong player.activeEffects.burst[i].custom (xem
+                // runWaterBubbleEffect/updateWaterBubbleEffect trong 09-character-system.js). Điều
+                // kiện "đang có Burst active" giờ kiểm tra qua player.activeEffects.burst.length > 0
+                // (xem canUseBurst() đã cập nhật trong combat.js).
 
                 isGliding: false,
                 isPlunging: false,
@@ -464,7 +519,218 @@
                 aabb: new AABB(),
                 
                 attackState: 'idle', attackTimer: 0, attackBuffered: false, 
+
+                // Combo Attack System v1: comboIndex (1-based) — đòn ĐANG chạy trong chuỗi combo.
+                // 0 = không trong combo nào (idle). KHÔNG phải state machine mới — attackState vẫn
+                // mô tả đúng giai đoạn vật lý (windup/active/recovery) của BẤT KỲ đòn nào trong
+                // combo; comboIndex chỉ nói "đang ở đòn thứ mấy". Reset về 0 khi Combo Window đóng
+                // mà không có input tiếp theo (xem updateCombat() trong 08-physics-combat-camera-
+                // loop.js). Combo progression KHÔNG phụ thuộc hit/damage — chỉ phụ thuộc timing +
+                // input (yêu cầu đã xác nhận).
+                comboIndex: 0,
+
+                // Charged Attack v1 — Auto-trigger v2: state RIÊNG, hoàn toàn tách biệt khỏi
+                // comboIndex/attackBuffered của Normal Attack Combo. chargeTimer đếm THỜI GIAN GIỮ
+                // NÚT Attack (chỉ chạy khi attackState === 'charging' — xem handleAttackDown() trong
+                // combat.js). TỪ v2: khi chargeTimer đạt chargedAttack.chargeTime (đọc qua
+                // getChargedAttackConfig()), Charged Attack TỰ ĐỘNG thi triển NGAY (không cần thả nút
+                // nữa — xem updateCombat() nhánh 'charging' trong file 08). chargeReady GIỮ LẠI trong
+                // schema (không xoá field, tránh phá vỡ chỗ khác lỡ đọc) nhưng KHÔNG còn ý nghĩa
+                // "chờ release" — chỉ còn dùng làm cờ nội bộ đánh dấu "đã tự bắn" để handleAttackUp()
+                // không xử lý lại khi người chơi thả nút SAU khi đòn đã tự thi triển.
+                chargeTimer: 0, chargeReady: false,
+                // Charged Attack v1 — Buffer nối tiếp (Auto-trigger v2): trong lúc Charged Attack
+                // đang chạy (chargedWindup/chargedActive/chargedRecovery), THẢ tay ra rồi GIỮ LẠI đủ
+                // chargeTime lần nữa sẽ đánh dấu chargedAttackBuffered = true — khi chargedRecovery
+                // kết thúc, nếu có buffer -> tự thi triển Charged Attack KẾ TIẾP ngay lập tức. Yêu
+                // cầu đã xác nhận: giữ LIÊN TỤC không thả tay từ đầu KHÔNG được tính vào buffer — bắt
+                // buộc phải có ít nhất 1 lần thả tay trước khi bắt đầu đếm lại. chargedRebuffTimer
+                // đếm THỜI GIAN GIỮ LẠI này — TÁCH BIỆT hoàn toàn khỏi chargeTimer (vốn chỉ dùng cho
+                // lần charge ĐẦU TIÊN từ idle, ở attackState === 'charging') vì trong lúc buffer,
+                // attackState đang là chargedWindup/chargedActive/chargedRecovery, KHÔNG phải
+                // 'charging'. Nếu giữ chưa đủ giờ khi chargedRecovery kết thúc -> rơi về Normal
+                // Attack (yêu cầu đã xác nhận), xem updateCombat() trong file 08.
+                chargedRebuffTimer: 0, chargedAttackBuffered: false,
+                // chargedRebuffArmed: cờ "đã thả tay lại ít nhất 1 lần trong đòn Charged Attack hiện
+                // tại, cho phép bắt đầu đếm chargedRebuffTimer nếu giữ lại". Reset về false MỖI LẦN
+                // triggerChargedAttack() chạy (chu kỳ mới). Bật true ngay khi isAttackHeld chuyển
+                // false trong lúc Charged Attack đang chạy — xem updateCombat() (file 08). Không có
+                // field này thì KHÔNG PHÂN BIỆT được "giữ liên tục xuyên suốt" (không tính buffer,
+                // theo yêu cầu) với "thả ra rồi giữ lại" (có tính buffer).
+                chargedRebuffArmed: false,
+                // isAttackHeld: cờ THEO DÕI nút Attack hiện có đang được giữ hay không (true từ lúc
+                // handleAttackDown() tới lúc handleAttackUp() — xem combat.js). Input chỉ tới qua sự
+                // kiện rời rạc (mousedown/mouseup), nhưng updateCombat() (file 08) cần biết trạng
+                // thái này MỖI FRAME để tăng chargedRebuffTimer trong lúc Charged Attack đang chạy
+                // (buffer nối tiếp) — không có polling nào khác cho trạng thái giữ chuột/tay.
+                isAttackHeld: false,
+                // heldThroughComboTimer: ĐỘ TRỄ XÁC NHẬN "giữ có chủ đích" (yêu cầu đã xác nhận) —
+                // KHÔNG tự động bắt đầu charge NGAY LẬP TỨC tại thời điểm windup/active chuyển sang
+                // recovery/comboGrace nữa (gây bug: tap NHANH để nối combo bình thường, tay chưa kịp
+                // nhả đúng lúc frame chuyển state chạy tới, bị hiểu nhầm thành "giữ để charge", cướp
+                // mất input tap #2 hợp lệ). Thay vào đó: khi vừa chuyển sang recovery/comboGrace mà
+                // isAttackHeld vẫn true, bắt đầu đếm timer này — chỉ THỰC SỰ gọi lại handleAttackDown()
+                // để bắt đầu charge nếu isAttackHeld vẫn còn true LIÊN TỤC sau khi đạt ngưỡng
+                // HELD_THROUGH_COMBO_DELAY (xem combat.js) — đủ ngắn để không cảm nhận được độ trễ khi
+                // charge thật, đủ dài để lọc bỏ tap nhanh. Reset về 0 mỗi khi isAttackHeld chuyển false
+                // (mouseup) hoặc mỗi khi bắt đầu 1 đòn Normal Attack mới (windup) — xem updateCombat()
+                // (file 08).
+                heldThroughComboTimer: 0,
+                // hasHitList RIÊNG cho Charged Attack (Charged Attack KHÔNG dùng chung
+                // player.hasHitList của Normal Attack — theo đúng yêu cầu "Charged Attack phải có
+                // hit tracking riêng"). Reset mỗi lần triggerChargedAttack() chạy (xem combat.js).
+                //
+                // Multi-Hit v2: TỪ v2, mỗi phần tử là CHUỖI "enemyId:hitIndex" (KHÔNG còn chỉ
+                // enemyId) — cho phép các hit KHÁC NHAU trong CÙNG 1 Charged Attack instance trúng
+                // CÙNG 1 enemy (VD hit #1 và hit #2 cùng trúng enemy X — 2 chuỗi khác nhau
+                // "X:0"/"X:1"), trong khi VẪN chặn đúng 1 hit cụ thể trúng cùng enemy quá 1 lần (VD
+                // enemy X đứng nguyên trong tầm suốt nhiều frame của cùng 1 hit -> chỉ trúng 1 lần
+                // duy nhất cho hitIndex đó). Toàn bộ mảng reset về [] CHỈ khi triggerChargedAttack()
+                // chạy (1 LẦN cho cả chuỗi multi-hit/multi-animation — "Charged Attack multi-hit vẫn
+                // là MỘT instance", yêu cầu đã xác nhận) — KHÔNG reset giữa các animation segment/hit.
+                chargedHasHitList: [],
+                // chargedAttackElapsed: đếm XUÔI (giây) từ 0, tính từ lúc player.attackState chuyển
+                // sang 'chargedActive' (reset về 0 tại thời điểm đó — xem updateCombat() file 08).
+                // DÙNG DUY NHẤT để so khớp với hits[i].time (yêu cầu đã xác nhận: "hits[] tính TỪ LÚC
+                // chargedActive bắt đầu", ĐỘC LẬP hoàn toàn với animations[]/chargedAnimIndex bên
+                // dưới — 2 cơ chế tách biệt). KHÔNG dùng cho windup/recovery (hits chỉ xảy ra trong
+                // active — theo đúng dữ liệu hiện tại đã chuyển đổi, xem 10-character-roster.js).
+                chargedAttackElapsed: 0,
+                // chargedHitsTriggered: mảng boolean cùng độ dài hits[] — đánh dấu hit[i] ĐÃ ĐƯỢC
+                // "mở" (tới thời điểm time của nó) hay chưa, TÁCH BIỆT khỏi chargedHasHitList (vốn
+                // track theo TỪNG enemy) — hit có thể "mở" (đã tới lúc) nhưng CHƯA có enemy nào trong
+                // tầm để trúng; mảng này chỉ đảm bảo KHÔNG chạy lại logic "mới mở hit" (hiệu ứng SFX/
+                // hitstop MỘT LẦN cho mỗi hit) nhiều lần. Reset cùng lúc với chargedAttackElapsed.
+                chargedHitsTriggered: [],
+                // chargedAnimIndex/chargedPhaseElapsed: theo dõi animation segment ĐANG CHẠY trong
+                // PHASE HIỆN TẠI (windup/active/recovery — 3 tên attackState GIỮ NGUYÊN, yêu cầu đã
+                // xác nhận "giữ 3 state cũ, nhiều segment TRONG từng state"). chargedAnimIndex là INDEX
+                // trong danh sách animation segment đã được lọc theo đúng phase (0-based, reset về 0
+                // mỗi khi chuyển sang phase mới — VD windup->active reset lại 0 cho danh sách segment
+                // của active). chargedPhaseElapsed đếm XUÔI (giây) thời gian đã trôi qua TRONG segment
+                // đang chạy (reset về 0 mỗi khi chuyển sang segment kế/phase kế) — dùng để tính prog
+                // nội suy animation. HOÀN TOÀN TÁCH BIỆT khỏi chargedAttackElapsed (dùng cho hits[]).
+                chargedAnimIndex: 0, chargedPhaseElapsed: 0,
+                // chargedAttackForward: hướng tấn công (THREE.Vector3), TÍNH 1 LẦN DUY NHẤT lúc
+                // player.attackState chuyển sang 'chargedActive' — DÙNG LẠI cho MỌI hit trong hits[]
+                // xảy ra trong lần active đó (yêu cầu thiết kế Multi-Hit v2: hit sau vẫn đánh theo
+                // hướng lúc BẮT ĐẦU active, KHÔNG xoay theo hướng camera/di chuyển giữa 2 hit — tránh
+                // hành vi lạ nếu người chơi xoay người giữa chừng). Khởi tạo Vector3(0,0,1) vô hại,
+                // GIÁ TRỊ THẬT được gán lại (.set()) mỗi lần chuyển sang chargedActive (xem
+                // updateCombat() file 08) — không dùng giá trị khởi tạo này để tính damage/hit thật.
+                chargedAttackForward: new THREE.Vector3(0, 0, 1),
+
+                // Idle Animation (Character Foundation — procedural bob dùng sin()): tích lũy thời
+                // gian ĐỘC LẬP với dt/FPS, chỉ tăng khi Idle bob đang thực sự chạy (attackState ===
+                // 'idle' và không bơi/leo/dash/plunge/di chuyển tích cực — xem updatePhysics() trong
+                // 08-physics-combat-camera-loop.js). KHÔNG phải animation state machine mới, chỉ là 1
+                // bộ đếm thời gian để sin() không phụ thuộc FPS.
+                idleAnimTimer: 0,
+
+                // Arm Sway / Inertia v1 (Character Movement): vị trí Y "trễ" (lagged) của từng tay so
+                // với base pose, tạo cảm giác quán tính khi di chuyển — CHỈ dùng trong nhánh Movement
+                // lean hiện có (không phải state machine mới, chỉ là 2 số runtime lưu độ trễ). Nguồn
+                // chính là player.inputVelocity (KHÔNG dùng sin(time) độc lập). Khởi tạo 0 = trùng
+                // base pose lúc chưa di chuyển.
+                leftHandSwayVelocity: 0,
+                rightHandSwayVelocity: 0,
                 hasHitList: [], sword: null, slashWave: null,
+
+                // Character #2 (Bow) Validation — Normal Attack Arrow Spawn Tracking: TÁCH RIÊNG
+                // khỏi hasHitList (đó là kết quả VA CHẠM của melee cone-hit, không áp dụng cho Bow —
+                // xem spec mục 2 "Damage phải phụ thuộc collision thực tế", KHÔNG dùng hasHitList
+                // kiểu "chạm 1 lần" cho arrow). arrowsSpawnedThisShot: mảng boolean cùng độ dài
+                // combo[comboIndex-1].arrows[] của SHOT ĐANG CHẠY — đánh dấu arrow[i] đã được SPAWN
+                // (chưa nói tới việc có TRÚNG hay không — trúng/không do chính projectile tự quyết
+                // định qua va chạm, xem 09-character-system.js) hay chưa, để applyBowArrowSpawnTick()
+                // (combat.js) không spawn trùng 1 arrow nhiều lần trong cùng 1 shot. Reset MỖI LẦN
+                // triggerAttack() bắt đầu 1 shot mới (kể cả nối combo) — xem combat.js.
+                arrowsSpawnedThisShot: [],
+
+                // Character #3 (Polearm) Validation — Normal Attack Multi-Hit Tracking: TÁCH RIÊNG
+                // khỏi hasHitList (melee 1-hit-per-slot của Sword, chỉ track theo enemy.id — KHÔNG hỗ
+                // trợ "1 animation nhiều hit" theo spec Polearm mục 7) và arrowsSpawnedThisShot (Bow,
+                // không liên quan damage event melee). ĐÚNG PATTERN chargedHitsTriggered/
+                // chargedHasHitList (Sword Charged Attack, xem bên dưới) NHƯNG áp dụng cho Normal
+                // Attack combo — vì mỗi combo SLOT (Attack #1/#2/#3...) của Polearm có thể tự khai báo
+                // hits[] riêng (VD Attack #3 có Hit#1+Hit#2, spec mục 7), track ĐỘC LẬP theo comboIndex
+                // hiện tại — RESET mỗi lần bắt đầu 1 đòn combo mới (windup), giống hasHitList/
+                // arrowsSpawnedThisShot (xem combat.js, chỗ reset comboIndex).
+                //
+                // polearmHitsTriggered: mảng boolean, index = hitIndex trong
+                // talents.normalAttack.combo[comboIndex-1].hits[] — đánh dấu hit đó đã "mở" (tới đúng
+                // thời điểm trong animation) hay chưa, độc lập với việc CÓ enemy nào bị trúng không.
+                polearmHitsTriggered: [],
+                // polearmHasHitList: mảng string "enemyId:hitIndex" — ĐÚNG PATTERN chargedHasHitList
+                // (KHÔNG PHẢI chỉ enemyId) để 1 enemy có thể trúng NHIỀU hit khác nhau trong CÙNG 1
+                // đòn combo (multi-hit đúng nghĩa) nhưng không trúng lại đúng 1 hit đã ăn rồi.
+                polearmHasHitList: [],
+
+                // Character #2 (Bow) Validation — Bow Charged Attack (Aim Mode) state: TÁCH RIÊNG
+                // hoàn toàn khỏi chargeTimer/chargedWindup/... của Character #1 (Sword) — Bow Charged
+                // Attack KHÔNG dùng state machine chargedWindup/chargedActive/chargedRecovery (đó là
+                // charge-tại-chỗ multi-hit), mà tái dùng skillAimState (file 03) làm Aim Mode, chỉ
+                // kích hoạt từ input Attack (mousedown) thay vì input Skill (phím E) — xem combat.js.
+                // bowAimChargeTimer: đếm XUÔI (giây) từ lúc Aim Mode (skillAimState.phase==='aiming')
+                // bắt đầu do Charged Attack Bow kích hoạt — dùng để tra Charge Level hiện tại qua
+                // bowChargedAttack.levels[].minChargeTime (talents, file 10). Reset về 0 mỗi lần bắt
+                // đầu Aim Mode MỚI do Bow (không dùng chung/đụng skillAimState.aimTimer, vốn phục vụ
+                // trần thời gian Elemental Skill Hold — 2 mục đích khác nhau dù cùng object phase).
+                bowAimChargeTimer: 0,
+                // isBowChargedAiming: cờ đánh dấu "Aim Mode hiện tại được kích hoạt BỞI Charged
+                // Attack Bow" (khác Aim Mode do phím Skill/E kích hoạt) — CẦN THIẾT vì skillAimState
+                // dùng CHUNG cho cả 2 nguồn, updateSkillAim()/endSkillAim() (combat.js) phải biết rẽ
+                // nhánh đúng: kích hoạt do Skill -> executeCharacterSkill() (hành vi cũ, KHÔNG đổi);
+                // kích hoạt do Bow Charged Attack -> bắn arrow theo Charge Level + trigger recovery
+                // riêng của Bow (KHÔNG gọi executeCharacterSkill(), nhân vật Bow không có skillId).
+                isBowChargedAiming: false,
+                // Character #2 (Bow) Validation — Arrow Visual/Charge Effect (spec mục 5): tham chiếu
+                // mesh MŨI TÊN ĐANG GẮN TRÊN CUNG lúc Aim Mode (KHÁC hoàn toàn arrow projectile thật
+                // trong player.activeEffects.arrows — đây chỉ là visual TĨNH đặt tại shooting point,
+                // không di chuyển/không va chạm, chỉ tồn tại trong lúc đang giữ Aim). null khi không
+                // aim. Tạo/hủy bởi startBowArrowPreview()/clearBowArrowPreview() (combat.js), cập
+                // nhật màu/scale theo Charge Level bởi updateBowArrowPreview() (combat.js) — MỖI FRAME
+                // trong updateBowAimChargeTick().
+                bowAimArrowPreview: null,
+
+                // Elemental Skill Validation — isDecoyPlacing: cờ đánh dấu "Aim Mode hiện tại được
+                // kích hoạt BỞI Decoy Bomb Placement Mode" — CÙNG NGUYÊN TẮC với isBowChargedAiming ở
+                // trên (skillAimState dùng CHUNG cho 3 nguồn: Elemental Skill Hold của Character #1,
+                // Bow Charged Attack, và giờ thêm Decoy Placement). updateSkillAim()/endSkillAim()
+                // (combat.js) đọc field này để rẽ nhánh: Placement Mode -> deployDecoy() tại điểm
+                // raycast (KHÔNG bắn theo hướng như executeCharacterSkill()/endBowChargedAttack()).
+                isDecoyPlacing: false,
+
+                // Passive/Unique Mechanic — "Overwatch" (Phase 1, Character #2): overwatchTimer đếm
+                // NGƯỢC (giây) từ lúc deployDecoy() thành công (đúng nhân vật có talents.passive.
+                // overwatch — data-driven, KHÔNG hard-code theo nhân vật/id nào ở đây). Field này KHÔNG
+                // đặt trong partyState (khác skillCooldownTimer/energy — những field per-character cần
+                // giữ riêng khi switch nhân vật) vì Passive/buff timing này gắn với chính THAO TÁC
+                // Charged Attack sắp tới của Player, ngữ nghĩa tạm thời giống bowAimChargeTimer hơn là
+                // state bền theo từng Character — nếu switch Character giữa lúc overwatchTimer > 0,
+                // hành vi thực tế: Character mới (nếu không có talents.passive.overwatch) đơn giản
+                // không đọc field này, cửa sổ coi như "lãng phí" (chấp nhận được, ngoài phạm vi test kỹ
+                // ở Phase 1 — sẽ xem lại tại Phase 6 Integration Test nếu cần).
+                overwatchTimer: 0,
+                // overwatchActiveForThisCharge: cờ SNAPSHOT tại triggerBowChargedAttack() — TIÊU THỤ
+                // overwatchTimer NGAY LẬP TỨC lúc đó (set về 0), rồi cờ này giữ hiệu lực buff cho SUỐT
+                // phiên charge hiện tại (từ lúc bắt đầu giữ nút tới lúc release/hủy) — đọc bởi
+                // getCurrentBowChargeLevel()/updateBowAimChargeTick() (combat.js) để cộng
+                // chargeTimeBonus vào giá trị so sánh Charge Level. Reset về false tại
+                // endBowChargedAttack() (dọn dẹp sau khi dùng, tránh rò rỉ sang phiên charge kế tiếp
+                // không liên quan) — xem chi tiết đầy đủ trong combat.js.
+                overwatchActiveForThisCharge: false,
+
+                // Character #3 Validation — Burst State fields. GIỮ TRÊN player (session), KHÔNG
+                // chuyển xuống partyState[i] (Q&A Integration Test đã chốt: chặn switchToCharacter()
+                // trong lúc Burst State active thay vì di chuyển state — đơn giản hơn, đủ an toàn).
+                isBurstStateActive: false,
+                burstStateTimer: 0,
+                burstStateExitPending: false,
+                thunderCharge: 0,           // 0-3, CHỈ tồn tại trong Burst State — reset 0 khi bắt
+                                            // đầu VÀ khi kết thúc Burst State (không carryover)
+                thunderChargeCooldownTimer: 0, // đếm ngược SAU Thunder Finisher — chặn +1 Charge MỚI
+                                                // trong lúc này (NA/CA vẫn damage/animate bình thường)
 
                 isDashing: false, dashTimer: 0, dashCooldownTimer: 0,
                 dashDirection: new THREE.Vector3(), lastMovementDirection: new THREE.Vector3(0, 0, 1), 
@@ -501,42 +767,78 @@
                 constellation: 0     // Reserved — Constellation System (Alpha), 0 = chưa mở
             };
 
-            // --- LEVEL_CONFIG: công thức EXP cần để lên level tiếp theo + mức tăng chỉ số mỗi level.
-            // Tách riêng thành hàm thay vì bảng tra cứu cứng (VD { 1: 100, 2: 250, ... }) để KHÔNG giới
-            // hạn số level tối đa — mục 4 spec: "Thiết kế hệ thống đủ linh hoạt để có thể mở rộng trong
-            // tương lai". Tăng trưởng tuyến tính đơn giản (Pre-Alpha, chưa cân bằng) — dễ đổi công thức
-            // sau này (VD hàm mũ) mà KHÔNG cần sửa checkLevelUp() hay bất kỳ nơi gọi nào khác.
+            // --- LEVEL_CONFIG: công thức EXP cần để lên level tiếp theo.
             //   expForLevel(level): tổng EXP cần có để lên từ `level` -> `level + 1`.
-            //   statGrowth: lượng CỘNG THÊM vào từng chỉ số mỗi lần lên 1 level (không phải % nhân).
             const LEVEL_CONFIG = {
                 expForLevel(level) {
                     return 50 + (level - 1) * 25;
-                },
-                statGrowth: {
-                    maxHp: 10,
-                    atk: 2,
-                    def: 1
                 }
             };
             window.LEVEL_CONFIG = LEVEL_CONFIG;
+
+            // Stat Baseline Update v1 — Level Scaling kiểu Genshin: THAY THẾ hoàn toàn
+            // LEVEL_CONFIG.statGrowth (cộng dồn tuyến tính CỐ ĐỊNH +10/+2/+1 mỗi level, dùng CHUNG
+            // mọi nhân vật — không tương thích với baseline Genshin vốn TÍNH LẠI từ baseStats gốc
+            // theo % tăng trưởng phi tuyến, khác nhau ở mỗi mốc level). Công thức chính thức
+            // (Character/Level Scaling, Fandom, hệ 5-star — game hiện tại chỉ có 1 rarity nên dùng
+            // chung công thức này cho MỌI nhân vật): 
+            //   LevelMultiplier(L) = round( (100+9L)/109 × (1900+L)/1901, 3 )
+            // Alpha v1.0 CHỈ dùng multiplier trơn — CHƯA có Ascension (giá trị cộng thêm đột biến ở
+            // mốc 20/40/50/60/70/80/90, xem báo cáo) vì Ascension value phụ thuộc thiết kế riêng
+            // từng nhân vật thật trong Genshin, không có công thức tổng quát để suy ra cho nhân vật
+            // tự chế — ĐÃ XÁC NHẬN với người dùng "chỉ dùng LevelMultiplier trơn ở Alpha v1.0". Hàm
+            // này KHÔNG giới hạn cứng level tối đa (dùng công thức, không phải bảng tra cứu) — có
+            // thể mở rộng > 90 nếu cần dù chưa dùng.
+            function getLevelMultiplier(level) {
+                const L = level || 1;
+                const base = (100 + 9 * L) / 109;
+                return Math.round(base * (1900 + L) / 1901 * 1000) / 1000;
+            }
+            window.getLevelMultiplier = getLevelMultiplier;
+
+            // getScaledStats(baseStats, level): {maxHp, atk, def} ĐÃ NHÂN theo level — dùng CHUNG
+            // cho MỌI nhân vật, đọc baseStats TỪ CHARACTER_ROSTER (giá trị Lv.1), KHÔNG cộng dồn
+            // hay lưu trạng thái trung gian nào — mỗi lần gọi TÍNH LẠI TỪ ĐẦU dựa trên level hiện
+            // tại, đúng bản chất công thức nhân (khác cộng dồn tuyến tính cũ). Ở Lv.1,
+            // getLevelMultiplier(1) = 1.0 CHÍNH XÁC (đã kiểm chứng: (100+9)/109 × (1901)/1901 =
+            // 1.0 × 1.0 = 1.0) — nên kết quả hàm này ở Lv.1 LUÔN KHỚP TUYỆT ĐỐI với baseStats gốc,
+            // không đổi hành vi khởi tạo nhân vật mới trong initParty().
+            function getScaledStats(baseStats, level) {
+                const mult = getLevelMultiplier(level);
+                return {
+                    maxHp: Math.round(baseStats.maxHp * mult),
+                    atk: Math.round(baseStats.atk * mult),
+                    def: Math.round(baseStats.def * mult)
+                };
+            }
+            window.getScaledStats = getScaledStats;
 
             // Kiểm tra + xử lý lên level — gọi SAU MỖI LẦN player.exp thay đổi (xem REWARD_HANDLERS.exp,
             // file 01). Dùng vòng lặp while (không phải if) để xử lý đúng trường hợp nhận 1 lượng EXP
             // lớn vượt NHIỀU ngưỡng level cùng lúc (VD quest thưởng EXP khủng) — lên level liên tiếp
             // trong cùng 1 lần gọi thay vì phải đợi lần cộng EXP kế tiếp mới lên tiếp level còn thiếu.
-            // Khi lên level: CỘNG THÊM (không phải đặt lại) statGrowth vào maxHp/atk/def hiện tại — giữ
-            // nguyên mọi buff/thay đổi khác có thể có trên stats sau này (VD Ascension cộng thêm sau).
-            // hp hiện tại cũng được cộng thêm đúng bằng phần maxHp vừa tăng (không tự động full hồi) —
-            // giữ nguyên tỉ lệ % HP đang có, tránh cảm giác "heal miễn phí" mỗi lần lên cấp.
+            //
+            // Stat Baseline Update v1: KHI lên level, TÍNH LẠI HOÀN TOÀN maxHp/atk/def qua
+            // getScaledStats(character.baseStats, player.level) — KHÔNG còn cộng dồn statGrowth cố
+            // định (đã xóa field đó khỏi LEVEL_CONFIG). hp hiện tại được scale ĐÚNG THEO TỈ LỆ %
+            // đang có trước khi lên level (GIỮ NGUYÊN nguyên tắc comment gốc "không heal miễn phí
+            // mỗi lần lên cấp") — nếu maxHp cũ = 0 (chưa từng xảy ra nhưng phòng vệ chia 0), coi
+            // như 100% để không tạo NaN.
             function checkLevelUp() {
                 let leveledUp = false;
+                const character = getActiveCharacterData();
                 while (player.exp >= LEVEL_CONFIG.expForLevel(player.level)) {
                     player.exp -= LEVEL_CONFIG.expForLevel(player.level);
                     player.level += 1;
-                    player.stats.maxHp += LEVEL_CONFIG.statGrowth.maxHp;
-                    player.stats.hp += LEVEL_CONFIG.statGrowth.maxHp;
-                    player.stats.atk += LEVEL_CONFIG.statGrowth.atk;
-                    player.stats.def += LEVEL_CONFIG.statGrowth.def;
+
+                    const oldMaxHp = player.stats.maxHp;
+                    const hpRatio = oldMaxHp > 0 ? (player.stats.hp / oldMaxHp) : 1;
+                    const scaled = getScaledStats(character.baseStats, player.level);
+                    player.stats.maxHp = scaled.maxHp;
+                    player.stats.atk = scaled.atk;
+                    player.stats.def = scaled.def;
+                    player.stats.hp = Math.round(scaled.maxHp * hpRatio);
+
                     leveledUp = true;
                 }
                 if (leveledUp) {
@@ -583,33 +885,22 @@
             //     player (không đổi tên, không đổi cách 08-physics-combat-camera-loop.js/combat.js truy
             //     cập) nhưng giá trị được switchToCharacter() trỏ sang đúng bộ mesh của PartyMember mới.
             //
-            // PARTY_CONFIG: data-driven — định nghĩa danh sách Character trong Party (spec mục 4: Test
-            // Character dùng ĐÚNG 1 model/animation với Character chính, chỉ khác identity/stats/màu để
-            // phân biệt trực quan trong lúc test). 2 slot Reserved (null) — có sẵn "chỗ trống" trong
-            // Party cho tương lai (VD nhận thêm Character qua Wish) mà không cần đổi cấu trúc mảng.
+            // PARTY_CONFIG: Alpha v1.0 — Character System. Chỉ còn danh sách characterId trỏ vào
+            // CHARACTER_ROSTER (10-character-roster.js) — KHÔNG còn tự chứa name/element/region/
+            // bodyColor/baseStats như trước (tránh trùng lặp dữ liệu ở 2 nơi). initParty()/
+            // switchToCharacter() bên dưới tra cứu CHARACTER_ROSTER[characterId] để lấy dữ liệu đó,
+            // HÀNH VI RUNTIME KHÔNG ĐỔI — chỉ đổi NGUỒN ĐỌC dữ liệu tĩnh.
             const PARTY_CONFIG = [
-                {
-                    id: 'traveler_hydro',
-                    name: 'Traveler',
-                    element: 'Hydro',
-                    region: 'Mondstadt',
-                    bodyColor: 0x475569, // Màu gốc — giữ đúng như player Pre-Alpha trước v0.8.5
-                    baseStats: { maxHp: 160, atk: 14, def: 10 }
-                },
-                {
-                    id: 'test_character_anemo',
-                    // Pre-Alpha v0.8.5 mục 4 — Test Character: tên/element khác Traveler để phân biệt rõ
-                    // trong Character HUD/Character Screen (Bước 2), nhưng dùng CHUNG model (xem
-                    // buildCharacterMesh trong 04-scene-init.js) — chỉ đổi bodyColor để nhận diện bằng
-                    // mắt thường lúc test switch trong lúc CHƯA có Character HUD (Bước 1).
-                    name: 'Test Character',
-                    element: 'Anemo',
-                    region: 'Mondstadt',
-                    bodyColor: 0x16a34a,
-                    baseStats: { maxHp: 140, atk: 12, def: 8 }
-                },
-                null, // Reserved slot 3 — dành cho Character nhận thêm sau này (Alpha)
-                null  // Reserved slot 4
+                { characterId: 'traveler_hydro' },
+                { characterId: 'test_character_anemo' },
+                // Character #2 (Bow) Validation — slot 3 (phím "3") giờ dùng để test archer_test.
+                // Reserved slot cũ này trước đây là null — gán entry mới KHÔNG ảnh hưởng slot 1/2.
+                { characterId: 'archer_test' },
+                // Character #3 (Polearm) Validation — slot 4 (phím "4") giờ dùng để test polearm_test
+                // (test fixture, spec mục 14: "KHÔNG được coi là playable Character #3" — chỉ để kiểm
+                // tra mesh/combo/hitbox/collision/Charged Attack/Plunge). Reserved slot cũ (null) —
+                // gán entry mới KHÔNG ảnh hưởng slot 1/2/3, ĐÚNG PATTERN archer_test ở slot 3.
+                { characterId: 'polearm_test' }
             ];
             window.PARTY_CONFIG = PARTY_CONFIG;
 
@@ -632,20 +923,81 @@
                 PARTY_CONFIG.forEach((config, index) => {
                     if (!config) { partyState.push(null); return; }
 
-                    const meshRefs = window.buildCharacterMesh(config.bodyColor);
+                    // Alpha v1.0: tra cứu dữ liệu tĩnh (name/element/region/visualConfig/baseStats)
+                    // từ CHARACTER_ROSTER qua config.characterId — GIÁ TRỊ ĐỌC RA giống hệt trước
+                    // (traveler_hydro/test_character_anemo có cùng số liệu, chỉ đổi nơi lưu).
+                    // Alpha v1.0 — Character Foundation: buildCharacterMesh() giờ nhận NGUYÊN
+                    // visualConfig (object đầy đủ) thay vì chỉ bodyColor — đọc toàn bộ cấu hình
+                    // Core/Hand/Hand/weaponGrip, xem 04-scene-init.js.
+                    //
+                    // Weapon Visual System (data-driven) — truyền THÊM rosterEntry.weaponType làm
+                    // tham số thứ 2 để buildCharacterMesh() biết dựng hình học weapon nào (xem
+                    // buildWeaponMesh() trong 04-scene-init.js). Character #1/test_character_anemo
+                    // không khai báo weaponType (undefined) — buildCharacterMesh() tự fallback về
+                    // 'sword' (xem default param ở 04-scene-init.js), nên GIÁ TRỊ ĐỌC RA/HÀNH VI
+                    // KHÔNG ĐỔI cho 2 nhân vật này, chỉ archer_test (weaponType: 'bow') nhận Bow mesh.
+                    //
+                    // Character #3 (Polearm) Validation — Weapon Schema v2: đọc rosterEntry.weapon.type
+                    // (schema MỚI — {category,type,visualProfile,attackProfile}, xem CHARACTER_ROSTER)
+                    // TRƯỚC rosterEntry.weaponType (schema CŨ, chỉ 'bow'|null) — ĐÚNG PATTERN
+                    // getActiveWeaponCategory() (combat.js) đã dùng, đảm bảo 2 nơi đọc weapon type LUÔN
+                    // NHẤT QUÁN (mesh dựng lên khớp đúng dispatch combat). Sword/Bow hiện tại CHỈ khai
+                    // báo weaponType cũ (chưa có field weapon mới) -> weaponResolvedType rơi về
+                    // rosterEntry.weaponType như cũ, HÀNH VI KHÔNG ĐỔI. Character #3 (polearm_test) khai
+                    // báo weapon.type: 'polearm' (schema mới) -> buildWeaponMesh() nhận đúng 'polearm'.
+                    const rosterEntry = CHARACTER_ROSTER[config.characterId];
+                    const weaponResolvedType = (rosterEntry.weapon && rosterEntry.weapon.type) || rosterEntry.weaponType;
+                    const meshRefs = window.buildCharacterMesh(rosterEntry.visualConfig, weaponResolvedType);
                     partyState.push({
-                        id: config.id,
-                        name: config.name,
-                        element: config.element,
-                        region: config.region,
+                        id: rosterEntry.id,
+                        name: rosterEntry.name,
+                        element: rosterEntry.element,
+                        region: rosterEntry.region,
                         weapon: null, artifacts: [], talents: [], constellation: 0,
                         level: 1,
                         exp: 0,
-                        stats: { maxHp: config.baseStats.maxHp, hp: config.baseStats.maxHp, atk: config.baseStats.atk, def: config.baseStats.def },
+                        // Stat Baseline Update v1: dùng getScaledStats(baseStats, 1) thay vì đọc
+                        // trực tiếp baseStats — ĐỒNG BỘ 1 NGUỒN CÔNG THỨC DUY NHẤT với checkLevelUp()
+                        // (không tính tay riêng ở đây). Kết quả GIỐNG HỆT baseStats gốc vì
+                        // getLevelMultiplier(1) = 1.0 chính xác (đã kiểm chứng) — KHÔNG đổi hành vi
+                        // khởi tạo nhân vật mới.
+                        stats: (function() {
+                            const s = getScaledStats(rosterEntry.baseStats, 1);
+                            return { maxHp: s.maxHp, hp: s.maxHp, atk: s.atk, def: s.def };
+                        })(),
                         mesh: meshRefs.group,
+                        // Alpha v1.0 — Character Foundation: tiltRoot/core/leftHand/rightHand MỚI —
+                        // xem buildCharacterMesh() (04-scene-init.js) và ghi chú hierarchy ở đó.
+                        tiltRoot: meshRefs.tiltRoot,
+                        core: meshRefs.core,
+                        leftHand: meshRefs.leftHand,
+                        rightHand: meshRefs.rightHand,
                         sword: meshRefs.sword,
                         slashWave: meshRefs.slashWave,
-                        gliderGroup: meshRefs.gliderGroup
+                        gliderGroup: meshRefs.gliderGroup,
+                        // Alpha v1.0 — Character System: skillCooldownTimer chuyển từ biến cục bộ
+                        // skillCooldownTimer trong combat.js sang ĐÂY, per-character, để switch nhân
+                        // vật giữa combat không làm mất/lẫn cooldown giữa các nhân vật trong Party
+                        // (quyết định đã chốt trước đó — CHƯA nối dây ở combat.js trong bước này).
+                        skillCooldownTimer: 0,
+                        // Energy System Fix v1: energy (runtime, bắt đầu = 0, TÁCH RIÊNG mỗi nhân
+                        // vật) + maxEnergy (CLONE từ rosterEntry.baseStats.maxEnergy — GIỐNG cách
+                        // stats.maxHp clone từ baseStats.maxHp phía trên, KHÔNG hard-code 50 ở đây).
+                        // player.energy/maxEnergy (file này, phía trên) giờ là getter/setter trỏ
+                        // THẲNG vào đúng field này của partyState[activeCharacterIndex] — switch nhân
+                        // vật tự động đổi đúng số, không cần đồng bộ tay ở switchToCharacter().
+                        energy: 0,
+                        maxEnergy: (typeof rosterEntry.baseStats.maxEnergy === 'number') ? rosterEntry.baseStats.maxEnergy : 50,
+                        // Core Energy + Elemental Particle System v1: energyRecharge — field RIÊNG
+                        // từng nhân vật (ĐÚNG PATTERN energy/maxEnergy ở trên), đọc bởi
+                        // resolveParticleEnergy() (12-energy-system.js) khi tính Energy nhận từ
+                        // Particle. CHƯA có artifact/weapon/stat bonus nào ghi đè giá trị này (mục 3,
+                        // 15 spec Energy System) — mặc định lấy từ ENERGY_CONFIG.defaultEnergyRecharge
+                        // (1.0) nếu chưa load kịp/thiếu, KHÔNG hard-code số 1.0 trực tiếp ở đây để chỉ
+                        // có 1 nguồn duy nhất định nghĩa default.
+                        energyRecharge: (window.ENERGY_CONFIG && typeof window.ENERGY_CONFIG.defaultEnergyRecharge === 'number')
+                            ? window.ENERGY_CONFIG.defaultEnergyRecharge
+                            : 1.0
                     });
                 });
 
@@ -660,6 +1012,10 @@
                 player.exp = first.exp;
                 player.stats = first.stats;
                 player.mesh = first.mesh;
+                player.tiltRoot = first.tiltRoot;
+                player.core = first.core;
+                player.leftHand = first.leftHand;
+                player.rightHand = first.rightHand;
                 player.sword = first.sword;
                 player.slashWave = first.slashWave;
                 player.gliderGroup = first.gliderGroup;
@@ -712,6 +1068,12 @@
                 player.stats = next.stats; // Từ đây player.hp/maxHp (getter/setter) đọc thẳng qua next.stats
 
                 player.mesh = next.mesh;
+                // Alpha v1.0 — Character Foundation: cập nhật thêm con trỏ tiltRoot/core/leftHand/
+                // rightHand — GIỮ NGUYÊN pattern cập nhật con trỏ như sword/slashWave/gliderGroup.
+                player.tiltRoot = next.tiltRoot;
+                player.core = next.core;
+                player.leftHand = next.leftHand;
+                player.rightHand = next.rightHand;
                 player.sword = next.sword;
                 player.slashWave = next.slashWave;
                 player.gliderGroup = next.gliderGroup;
@@ -730,12 +1092,77 @@
             }
             window.switchToCharacter = switchToCharacter;
 
+            // Alpha v1.0 — Character System: trả về entry CHARACTER_ROSTER của nhân vật đang active
+            // (dùng bởi executeCharacterSkill/executeCharacterBurst trong 09-character-system.js để
+            // biết skillId/burstId cần thực thi). KHÔNG trả về partyState[i] (đó là RUNTIME state —
+            // hp/level/mesh hiện tại) mà trả về entry TĨNH trong CHARACTER_ROSTER (skillId/burstId/
+            // visualConfig) — 2 khái niệm tách biệt theo đúng kiến trúc đã chốt.
+            function getActiveCharacterData() {
+                const active = partyState[activeCharacterIndex];
+                if (!active) return null;
+                return CHARACTER_ROSTER[active.id];
+            }
+            window.getActiveCharacterData = getActiveCharacterData;
+
             const COMBAT_TIMING = {
                 windup: 0.10,   
                 active: 0.18,   
                 recovery: 0.26  
             };
             window.COMBAT_TIMING = COMBAT_TIMING;
+
+            // Combo Window Config v1: tổng thời gian (giây, TÍNH TỪ LÚC recovery bắt đầu) mà input
+            // vẫn được buffer để nối sang đòn kế tiếp — TÁCH RIÊNG khỏi recovery duration (trước đây
+            // Combo Window LUÔN = đúng recovery, không cấu hình được độc lập). Nếu comboWindow >
+            // recovery của đòn đang chạy, phần chênh lệch trở thành giai đoạn MỚI 'comboGrace' (xem
+            // updateCombat() trong file 08): animation đã lerp xong, ĐỨNG YÊN ở pose cuối recovery,
+            // vẫn nhận input, chỉ snap về idle + reset combo khi hết comboGrace. Nếu comboWindow <=
+            // recovery, comboGrace có thời lượng <= 0 -> bị bỏ qua, hành vi giống hệt trước khi có
+            // field này (an toàn ngược, KHÔNG bắt buộc comboWindow phải lớn hơn recovery).
+            // FALLBACK toàn cục nếu nhân vật không khai báo visualConfig.comboWindow riêng — xem
+            // getComboWindow() trong combat.js.
+            const DEFAULT_COMBO_WINDOW = 0.26;
+            window.DEFAULT_COMBO_WINDOW = DEFAULT_COMBO_WINDOW;
+
+            // Charged Attack v1: config timing RIÊNG, TÁCH BIỆT hoàn toàn khỏi COMBAT_TIMING (vốn
+            // chỉ dành cho Normal Attack Combo #1–#4). KHÔNG hard-code rải rác trong combat logic —
+            // mọi nơi cần đọc chargeTime/staminaCost của Charged Attack PHẢI qua
+            // getChargedAttackConfig() (xem combat.js), hàm này đọc field visualConfig.chargedAttack
+            // riêng của từng nhân vật (nếu có) và fallback về DEFAULT_CHARGED_ATTACK bên dưới nếu
+            // thiếu — an toàn ngược, không crash cho nhân vật/character data cũ chưa khai báo field
+            // này.
+            //   chargeTime: thời gian (giây) phải giữ nút Attack để Charged Attack "sẵn sàng".
+            //   staminaCost: Stamina tiêu hao TỨC THỜI mỗi lần Charged Attack THỰC SỰ được kích hoạt
+            //   (yêu cầu đã xác nhận — baseline lấy cảm hứng Genshin Impact: 25 Stamina/lần). Tích
+            //   hợp vào ĐÚNG hệ thống Stamina đã có (STAMINA_CONFIG + player.stamina — xem
+            //   updateStamina() trong 08-physics-combat-camera-loop.js), KHÔNG tạo hệ thống riêng.
+            //   Dùng CHUNG pattern "tiêu hao tức thời 1 lần" đã có sẵn cho Dash/Climb Jump
+            //   (STAMINA_CONFIG.DASH_COST/CLIMB_JUMP_COST: "if (stamina >= cost) { trừ } else { chặn
+            //   hành động }", clamp về MIN_STAMINA, không trừ âm) — xem triggerChargedAttack() trong
+            //   combat.js.
+            //
+            // Multi-Animation + Multi-Hit v2: windup/active/recovery (số) ĐÃ XOÁ khỏi object này —
+            // KHÔNG còn ý nghĩa "duration cố định" nữa (giờ tính từ tổng duration của animation
+            // segment cùng phase, xem getChargedAttackPhaseDuration() trong combat.js). Thay vào đó
+            // DEFAULT_ANIMATIONS/DEFAULT_HITS bên dưới là fallback AN TOÀN NGƯỢC cho nhân vật hoàn
+            // toàn chưa khai báo talents.normalAttack.chargedAttack.animations/hits — GIỮ NGUYÊN số
+            // liệu windup=0.10/active=0.20/recovery=0.30 cũ dưới dạng animation segment 1 phần tử mỗi
+            // phase, và multiplier=1/type='light' làm hit mặc định vô hại (KHÔNG phải 'heavy' — tránh
+            // vô tình buff Reaction Level cho nhân vật thiếu data, đúng nguyên tắc fallback yếu nhất
+            // đã áp dụng cho getTalentImpact()).
+            const DEFAULT_CHARGED_ATTACK = {
+                chargeTime: 0.25,
+                staminaCost: 25.0,
+                animations: [
+                    { phase: 'windup', duration: 0.10, rightHandOffsetStart: { x: 0, y: 0, z: 0 }, rightHandOffsetEnd: { x: 0, y: 0, z: 0 }, rightHandRotOffsetStart: { x: 0, y: 0, z: 0 }, rightHandRotOffsetEnd: { x: 0, y: 0, z: 0 }, coreOffsetStart: { x: 0, y: 0, z: 0 }, coreOffsetEnd: { x: 0, y: 0, z: 0 } },
+                    { phase: 'active', duration: 0.20, rightHandOffsetStart: { x: 0, y: 0, z: 0 }, rightHandOffsetEnd: { x: 0, y: 0, z: 0 }, rightHandRotOffsetStart: { x: 0, y: 0, z: 0 }, rightHandRotOffsetEnd: { x: 0, y: 0, z: 0 }, coreOffsetStart: { x: 0, y: 0, z: 0 }, coreOffsetEnd: { x: 0, y: 0, z: 0 } },
+                    { phase: 'recovery', duration: 0.30, rightHandOffsetStart: { x: 0, y: 0, z: 0 }, rightHandOffsetEnd: { x: 0, y: 0, z: 0 }, rightHandRotOffsetStart: { x: 0, y: 0, z: 0 }, rightHandRotOffsetEnd: { x: 0, y: 0, z: 0 }, coreOffsetStart: { x: 0, y: 0, z: 0 }, coreOffsetEnd: { x: 0, y: 0, z: 0 } }
+                ],
+                hits: [
+                    { time: 0, scaling: { stat: 'ATK', multiplier: 1.0 }, impact: { type: 'light' } }
+                ]
+            };
+            window.DEFAULT_CHARGED_ATTACK = DEFAULT_CHARGED_ATTACK;
 
             // --- CẤU HÌNH SOFT TARGETING (Auto Aim hỗ trợ đòn đánh thường, v0.9.1) ---
             // Pre-Alpha: giá trị tạm thời, sẽ cân bằng lại sau. Toàn bộ ngưỡng khoảng cách/góc/tốc độ
@@ -766,10 +1193,19 @@
             // Chọn mục tiêu: xét tuần tự từng tier từ gần -> xa (đúng thứ tự khai báo trong tiers),
             // dùng địch gần nhất TRONG tier đó (nếu có nhiều địch cùng nằm trong 1 tier). Ưu tiên
             // tuyệt đối cho tier gần nhất có ít nhất 1 địch hợp lệ — không gộp chung tất cả các vùng.
-            function findSoftTargetingRotation(originPos, facingAngleY) {
+            //
+            // LƯU Ý KIẾN TRÚC (Target Assist 3D Upgrade): hàm này CHỈ dành cho hỗ trợ XOAY NGANG
+            // (yaw) của melee/lunge — luôn ép toEnemy.y = 0, KHÔNG xử lý chiều Y. Bow Normal Attack
+            // (và mọi ranged/projectile attack tương lai) dùng module TargetAssist RIÊNG (xem bên
+            // dưới, "TARGET ASSIST 3D — GENERIC MODULE") — module đó xử lý đầy đủ 3D (bao gồm Y) và
+            // trả trực tiếp aim direction cho projectile, KHÔNG tái sử dụng hàm này. Tách 2 hệ thống
+            // vì bản chất khác nhau: melee chỉ cần xoay THÂN NHÂN VẬT quanh trục Y (không có pitch),
+            // còn ranged cần hướng BẮN đầy đủ 3D (có thể chếch lên/xuống mà không xoay thân).
+            function findSoftTargetingRotation(originPos, facingAngleY, config) {
+                const targetingConfig = config || SOFT_TARGETING_CONFIG;
                 const forward = new THREE.Vector3(Math.sin(facingAngleY), 0, Math.cos(facingAngleY));
 
-                for (const tier of SOFT_TARGETING_CONFIG.tiers) {
+                for (const tier of targetingConfig.tiers) {
                     let bestEnemy = null;
                     let bestDist = Infinity;
 
@@ -803,6 +1239,88 @@
             }
             window.findSoftTargetingRotation = findSoftTargetingRotation;
 
+            // ============================================================
+            // TARGET ASSIST 3D — GENERIC MODULE (Character #2 Bow Validation)
+            // ============================================================
+            // Module DÙNG CHUNG cho MỌI ranged/projectile attack (Bow hiện tại, Catalyst/Elemental
+            // Skill projectile trong tương lai — spec mục 7: "Không hard-code hệ thống này chỉ dành
+            // cho Bow"). TÁCH BIỆT hoàn toàn khỏi findSoftTargetingRotation() (melee, yaw-only) vì
+            // ranged attack cần hướng bắn ĐẦY ĐỦ 3D (có thể chếch lên/xuống), không chỉ xoay thân.
+            //
+            // 3 hàm độc lập, mỗi hàm 1 trách nhiệm rõ ràng (đúng gợi ý spec mục 7 — tên hàm không cần
+            // khớp tuyệt đối, chỉ cần đúng tinh thần):
+            //   - getNearestTarget(origin, config): chọn địch gần nhất theo khoảng cách 3D THẬT.
+            //   - getTargetPoint(enemy): điểm ngắm hợp lý trên thân địch (dùng AABB nếu có).
+            //   - getAimDirection(origin, target, config): vector hướng bắn (targetPoint - origin,
+            //     normalized) — ĐẦY ĐỦ 3D, không ép Y=0.
+            //
+            // Nguyên tắc bất biến (spec mục 6, 10): các hàm này CHỈ trả về HƯỚNG BAN ĐẦU của
+            // projectile — không đụng gì tới damage, không tạo homing, không raycast thay physics.
+            // Sau khi có aim direction, projectile (spawnArrow()/updateArrowEffect()) hoàn toàn tự
+            // physics/collision như cũ, không còn liên hệ gì với module này.
+            const TargetAssist = {};
+
+            // getNearestTarget(origin, config): trả về enemy gần NHẤT theo khoảng cách 3D thật
+            // (Vector3.distanceTo — bao gồm cả Y), hoặc null nếu không có enemy hợp lệ trong
+            // config.maxRange. Không dùng tier/góc phức tạp như findSoftTargetingRotation() (đó là
+            // để hỗ trợ XOAY tự nhiên cho melee) — ranged Target Assist chỉ cần "gần nhất trong tầm",
+            // đúng spec mục 4 "Nearest Target + 3D": "Ưu tiên sử dụng khoảng cách 3D — distance =
+            // sqrt(dx²+dy²+dz²)".
+            TargetAssist.getNearestTarget = function(origin, config) {
+                const maxRange = (config && typeof config.maxRange === 'number') ? config.maxRange : 20;
+                let best = null;
+                let bestDist = Infinity;
+                for (let i = 0; i < enemies.length; i++) {
+                    const enemy = enemies[i];
+                    if (!enemy.alive) continue;
+                    const dist = origin.distanceTo(TargetAssist.getTargetPoint(enemy));
+                    if (dist > maxRange) continue;
+                    if (dist < bestDist) { bestDist = dist; best = enemy; }
+                }
+                return best;
+            };
+
+            // getTargetPoint(enemy): điểm ngắm hợp lý trên thân enemy — spec mục 3: "Không target vào
+            // origin/feet nếu khiến arrow đi qua phía trên; ưu tiên điểm gần center/mid-body; reuse
+            // hitbox/collider có sẵn nếu có". REUSE enemy.aabb (đã tồn tại, cập nhật mỗi frame bởi hệ
+            // thống collision hiện có — xem 03-skillstate-camera-collision-helpers.js,
+            // enemy.aabb.updateFromObject()) để lấy CENTER Y THẬT của hitbox
+            // ((aabb.minY + aabb.maxY) / 2) — KHÔNG cần tạo hitbox/collider mới (spec mục 3: "Không
+            // tạo hitbox mới chỉ để giải quyết vấn đề này nếu không cần thiết"). Fallback về
+            // enemy.position nếu enemy thiếu aabb hợp lệ (an toàn ngược, không crash).
+            TargetAssist.getTargetPoint = function(enemy) {
+                if (enemy.aabb && typeof enemy.aabb.minY === 'number' && typeof enemy.aabb.maxY === 'number') {
+                    const centerY = (enemy.aabb.minY + enemy.aabb.maxY) / 2;
+                    return new THREE.Vector3(enemy.position.x, centerY, enemy.position.z);
+                }
+                return enemy.position.clone();
+            };
+
+            // getAimDirection(origin, target, config): vector hướng bắn ĐẦY ĐỦ 3D từ origin (vị trí
+            // spawn projectile thật — spec mục 5: "Không giả định projectile bắt đầu từ center Player
+            // nếu đã có weapon/muzzle/grip position", nơi gọi PHẢI truyền origin là vị trí spawn thật)
+            // tới getTargetPoint(target), normalize — KHÔNG ép Y=0 (spec mục 2, 8: "ΔY phải được tính
+            // vào hướng bắn", hỗ trợ cả target thấp/cao/gần/xa). Trả về null nếu target null (không
+            // có target hợp lệ) — nơi gọi TỰ QUYẾT ĐỊNH fallback về forward hiện tại (spec mục 2, Test
+            // 5: "không có target -> bắn theo hướng hiện tại của Player").
+            TargetAssist.getAimDirection = function(origin, target) {
+                if (!target) return null;
+                const targetPoint = TargetAssist.getTargetPoint(target);
+                const dir = new THREE.Vector3().subVectors(targetPoint, origin);
+                if (dir.lengthSq() < 0.0001) return null; // Tránh normalize vector độ dài 0
+                return dir.normalize();
+            };
+
+            window.TargetAssist = TargetAssist;
+
+            // BOW_RANGED_TARGET_ASSIST_CONFIG: config RIÊNG cho Bow (spec mục 7 — module generic,
+            // nhưng MỖI loại ranged attack có tầm/hành vi khác nhau, nên config vẫn tách theo
+            // character/vũ khí, không gộp chung 1 hằng số duy nhất). Chỉ có `maxRange` — module
+            // TargetAssist không cần khái niệm tier/góc phức tạp như melee (spec không yêu cầu giới
+            // hạn góc cho ranged, chỉ cần "gần nhất trong tầm hợp lý").
+            const BOW_RANGED_TARGET_ASSIST_CONFIG = { maxRange: 22 };
+            window.BOW_RANGED_TARGET_ASSIST_CONFIG = BOW_RANGED_TARGET_ASSIST_CONFIG;
+
             // --- CẤU HÌNH ATTACK LUNGE (bước tới khi tấn công, v0.9.2) ---
             // Pre-Alpha: giá trị tạm thời, sẽ cân bằng lại sau. Toàn bộ khoảng cách/thời gian lunge
             // tập trung DUY NHẤT ở đây — không hard-code rải rác nơi khác.
@@ -819,6 +1337,11 @@
             const ATTACK_LUNGE_CONFIG = {
                 maxDistance: 2.2,
                 weaponRange: 1.6,
+                // Combo Attack System v2: duration KHÔNG còn được đọc ở đâu (đã thành dead field) —
+                // lungeTimer giờ dùng trực tiếp getCurrentAttackTiming().active (đòn đang chạy),
+                // xem 08-physics-combat-camera-loop.js windup->active transition. GIỮ field này
+                // trong config (không xóa) để tương thích ngược nếu có chỗ khác trong tương lai cần
+                // đọc "duration lunge mặc định" — hiện tại không có ý nghĩa runtime nào.
                 duration: COMBAT_TIMING.active,
                 noTargetDistance: 0.9
             };
@@ -872,6 +1395,87 @@
             };
             window.COMBAT_FEEL_CONFIG = COMBAT_FEEL_CONFIG;
 
+            // ============================================================
+            // Hit Reaction / Poise System — Alpha v1.0
+            // ============================================================
+            // Nguyên tắc: KHÔNG hard-code theo cặp cụ thể (VD "Sword -> 0.1s", "Small Slime -> 0.2s").
+            // Thay vào đó: Impact Strength/Type SO SÁNH với Poise Resistance/Weight Class của defender
+            // -> ra Reaction Level -> Reaction Level tra bảng ra duration/knockback/interrupt. Toàn bộ
+            // phép tính nằm trong resolveHitReaction() (combat.js) — 2 bảng dưới đây chỉ là DATA, không
+            // chứa logic. HP/DEF/Poise/Weight Class là 4 hệ thống ĐỘC LẬP (yêu cầu đã xác nhận): HP
+            // (sống/chết) và DEF (giảm damage) không đổi gì ở đây; Poise (chống gián đoạn) và Weight
+            // Class (đặc tính vật lý) là bổ sung MỚI, không dùng HP để giả lập.
+
+            // WEIGHT_CLASS_CONFIG: mỗi Weight Class có 1 "basePoise" (mốc để so sánh với Impact
+            // Strength — CÀNG CAO càng khó bị gián đoạn), 1 "knockbackMult" (hệ số nhân lực đẩy vật
+            // lý NGANG — entity càng nặng càng ít bị đẩy, dù cùng 1 impact.knockback), và 1
+            // "launchMult" (Phase Launch weightClass — hệ số nhân lực đẩy DỌC khi bị launch, VAI TRÒ
+            // TƯƠNG TỰ knockbackMult nhưng TÁCH RIÊNG modifier, KHÔNG dùng chung số với
+            // knockbackMult — vì độ khó bị đẩy ngang và độ khó bị hất lên không nhất thiết cùng tỉ lệ
+            // với 1 weight class, để mở đường balance riêng từng chiều sau này mà không ảnh hưởng
+            // lẫn nhau). basePoise KHÔNG phải "Poise Meter" (không tích lũy/hồi theo thời gian — CHƯA
+            // triển khai ở Alpha v1.0, xem ghi chú "CHƯA triển khai" trong yêu cầu) — chỉ là 1 con số
+            // tĩnh dùng NGAY LÚC so sánh mỗi lần trúng đòn, nhân với defender.poise.resistance (field
+            // trên entity, xem enemies.js) để ra effectiveResistance cuối cùng.
+            //
+            // launchMult: GIÁ TRỊ PLACEHOLDER, CHƯA BALANCE (yêu cầu đã xác nhận) — dùng trong
+            // resolveHitReaction() (combat.js) theo công thức verticalForce = levelCfg.launchVertical
+            // * weightCfg.launchMult, CHỈ áp dụng khi level === 'launch' (xem giải thích đầy đủ tại
+            // đó). Không cần đúng tỉ lệ với knockbackMult — light/medium/heavy/massive ở đây thấp hơn
+            // knockbackMult tương ứng 1 chút (0.8/0.5/0.2 so với 0.7/0.4/0.15) chỉ vì trực giác "khó
+            // hất lên hơn khó đẩy ngang", SẼ tinh chỉnh ở Phase Reaction Tuning.
+            const WEIGHT_CLASS_CONFIG = {
+                light: { basePoise: 22, knockbackMult: 1.0, launchMult: 1.0 },
+                medium: { basePoise: 65, knockbackMult: 0.7, launchMult: 0.8 },
+                heavy: { basePoise: 120, knockbackMult: 0.4, launchMult: 0.5 },
+                massive: { basePoise: 250, knockbackMult: 0.15, launchMult: 0.2 }
+            };
+            window.WEIGHT_CLASS_CONFIG = WEIGHT_CLASS_CONFIG;
+
+            // IMPACT_TYPE_CONFIG: mỗi Impact Type có "poiseDamage" (độ mạnh gây gián đoạn — so trực
+            // tiếp với basePoise*resistance của defender ở trên) và "maxReactionLevel" (TRẦN — impact
+            // type nhẹ không bao giờ tạo ra phản ứng mạnh hơn trần của nó dù tỉ lệ poiseDamage/
+            // resistance rất cao, đúng ví dụ "Launch -> Massive -> không launch": 'massive' weight có
+            // basePoise cực cao nên tỉ lệ luôn thấp, nhưng trần vẫn there để chặn tuyệt đối trong
+            // trường hợp resistance quá thấp gây lệch bảng). reactionLevelOrder dùng để so sánh
+            // "level nào mạnh hơn level nào" khi áp trần — xem resolveHitReaction() (combat.js).
+            const IMPACT_TYPE_CONFIG = {
+                light: { poiseDamage: 22, maxReactionLevel: 'light' },
+                medium: { poiseDamage: 45, maxReactionLevel: 'medium' },
+                heavy: { poiseDamage: 88, maxReactionLevel: 'heavy' },
+                launch: { poiseDamage: 140, maxReactionLevel: 'launch' }
+            };
+            window.IMPACT_TYPE_CONFIG = IMPACT_TYPE_CONFIG;
+
+            // REACTION_LEVEL_CONFIG: ngưỡng tỉ lệ (poiseDamage / effectiveResistance) để xác định
+            // Reaction Level cuối cùng, và số liệu tương ứng mỗi level — staggerDuration (giây,
+            // KHÔNG hard-code theo entity, chỉ theo LEVEL), interrupt (có buộc AI hủy action hiện tại
+            // hay không), knockbackScale (nhân thêm vào impact.knockback × weightClass.knockbackMult
+            // ở trên — level càng mạnh đẩy càng xa). Thứ tự minRatio TĂNG DẦN, level cuối cùng đạt
+            // ngưỡng là kết quả (trước khi áp trần maxReactionLevel của Impact Type). Bộ số liệu này
+            // đã được kiểm chứng khớp toàn bộ 8 ví dụ hành vi mong muốn (Light/Medium/Heavy/Launch ×
+            // Light/Medium/Heavy/Massive weight class) trước khi đưa vào code.
+            const REACTION_LEVEL_CONFIG = {
+                order: ['none', 'light', 'medium', 'heavy', 'launch'],
+                none:   { minRatio: 0,    staggerDuration: 0,    interrupt: false, knockbackScale: 0.3 },
+                light:  { minRatio: 0.5,  staggerDuration: 0.15, interrupt: false, knockbackScale: 1.0 },
+                medium: { minRatio: 0.85, staggerDuration: 0.30, interrupt: true,  knockbackScale: 1.5 },
+                heavy:  { minRatio: 1.5,  staggerDuration: 0.50, interrupt: true,  knockbackScale: 2.2 },
+                // launchVertical: Phase 4 (Launch Hit Reaction) — GIÁ TRỊ PLACEHOLDER, CHƯA BALANCE.
+                // Đơn vị m/s, cùng scale với jumpVelocityY/jumpPowerY hiện có của Slime (Small
+                // jumpPowerY=9.0, Large=7.2 — xem enemies.js) vì cả hai đều bị player.gravity trừ dần
+                // mỗi frame qua CHUNG một công thức (jumpVelocityY -= gravity*dt, xem update()). Đây
+                // là số GỐC tra theo LEVEL (giống staggerDuration) — TỪ Phase Launch weightClass, số
+                // gốc này còn bị nhân thêm WEIGHT_CLASS_CONFIG[weightClass].launchMult trong
+                // resolveHitReaction() (combat.js) để ra verticalForce cuối cùng, nên vertical force
+                // THỰC TẾ áp dụng lên từng entity ĐÃ khác nhau theo weightClass (khác thiết kế ban
+                // đầu — xem lịch sử comment cũ nếu cần đối chiếu). 12.0 chỉ là điểm khởi đầu để test
+                // behavior (cao hơn jumpPowerY Small ~33%) — SẼ chỉnh lại ở Phase Reaction Tuning
+                // sau, không tự ý balance thêm ở Phase này.
+                launch: { minRatio: 2.0,  staggerDuration: 0.65, interrupt: true,  knockbackScale: 16.0, launchVertical: 14.0 }
+            };
+            window.REACTION_LEVEL_CONFIG = REACTION_LEVEL_CONFIG;
+
             // --- CẤU HÌNH ELEMENTAL SKILL: TAP (Pressure Shot ngay) / HOLD (Aim State), v0.9.6 ---
             // Pre-Alpha: giá trị tạm thời, sẽ cân bằng lại sau. Toàn bộ ngưỡng/tốc độ/tần suất/camera
             // tập trung DUY NHẤT ở đây — không hard-code rải rác nơi khác.
@@ -922,54 +1526,15 @@
             };
             window.ELEMENTAL_SKILL_CONFIG = ELEMENTAL_SKILL_CONFIG;
 
-            // --- CẤU HÌNH ELEMENTAL BURST: thi triển NGAY khi nhấn (không Aim Mode, không crosshair) ---
-            // Pre-Alpha: giá trị tạm thời, sẽ cân bằng lại sau. Toàn bộ ngưỡng/tốc độ/bán kính/lực hút
-            // tập trung DUY NHẤT ở đây — không hard-code rải rác nơi khác. Water Bubble là trung tâm
-            // của Burst: di chuyển liên tục theo hướng thi triển, bao quanh bởi Water Vortex tạo lực hút
-            // Crowd Control (không phải hiệu ứng trang trí — vortex.radius chính là vùng gây lực hút).
-            //   bubble.speed: tốc độ (m/s) Bubble di chuyển liên tục theo hướng đã chọn — KHÔNG đứng yên.
-            //   bubble.lifetime: thời gian tồn tại tối đa (giây) trước khi Bubble tự tan (nếu chưa hết maxRange).
-            //   bubble.maxRange: quãng đường tối đa (m) Bubble có thể đi được trước khi tự tan.
-            //   bubble.radius: bán kính (m) của lõi Bubble — enemy lọt vào lõi mới nhận damage trực tiếp.
-            //   bubble.pulseSpeed / pulseAmount: tốc độ/biên độ phồng-co nhẹ (sin wave) để Bubble có cảm
-            //                                    giác là khối nước "sống", không phải quả cầu cứng.
-            //   vortex.radius: bán kính (m) vùng lực hút bao quanh Bubble — LỚN HƠN bubble.radius.
-            //   vortex.rotationSpeed: tốc độ xoay hình ảnh của vortex (rad/s) — thuần thẩm mỹ.
-            //   pull.smallEnemyForce: lực hút (m/s, áp vào velocity mỗi frame) tác động lên quái nhỏ —
-            //                         đủ để kéo từ từ về phía Bubble, KHÔNG dịch chuyển tức thời/teleport.
-            //   pull.largeEnemySlowFactor: hệ số nhân vào tốc độ di chuyển của quái to khi trong vortex
-            //                              (0..1, càng nhỏ càng khựng mạnh) — quái to KHÔNG bị hút hoàn
-            //                              toàn, chỉ giảm tốc/gián đoạn chuyển động trong thời gian ngắn.
-            //   pull.largeEnemyStaggerDuration: thời gian (giây) hiệu ứng khựng/giảm tốc còn áp dụng lên
-            //                                   quái to SAU KHI nó rời khỏi vortex (tính từ lúc rời) —
-            //                                   tránh việc quái to thoát khỏi khựng ngay lập tức khi vừa
-            //                                   ra khỏi bán kính, tạo cảm giác "gián đoạn chuyển động".
-            //   damage: hệ số nhân với player.attack.burst — áp dụng khi enemy ở trong bubble.radius
-            //           (lõi Bubble), KHÔNG áp dụng cho enemy chỉ đang bị vortex hút (đó thuần là CC).
-            //   damageTickInterval: khoảng cách (giây) tối thiểu giữa 2 lần gây damage liên tiếp lên
-            //                       CÙNG MỘT enemy trong lõi Bubble — tránh damage dồn dập mỗi frame.
-            const BURST_CONFIG = {
-                bubble: {
-                    speed: 2,
-                    lifetime: 14,
-                    maxRange: 12,
-                    radius: 1,
-                    pulseSpeed: 4.0,
-                    pulseAmount: 0.06
-                },
-                vortex: {
-                    radius: 3,
-                    rotationSpeed: 10
-                },
-                pull: {
-                    smallEnemyForce: 3,
-                    largeEnemySlowFactor: 1,
-                    largeEnemyStaggerDuration: 0.3
-                },
-                damage: 0.5, // Hệ số nhân với player.attack.burst
-                damageTickInterval: 0.35
-            };
-            window.BURST_CONFIG = BURST_CONFIG;
+            // Skill Aim Hardcode Fix v1 — DỌN DẸP CODE CHẾT: BURST_CONFIG (từng ở đây, chứa
+            // bubble/vortex/pull/damage/damageTickInterval của Water Bubble) đã được XÓA — kiểm
+            // tra xác nhận KHÔNG còn bất kỳ nơi nào trong codebase đọc BURST_CONFIG.* nữa. Toàn bộ
+            // logic Water Bubble (executeCharacterBurst()/updateWaterBubbleEffect(), file 09) đã
+            // refactor xong từ trước, đọc 100% qua fx.skillData (= SKILL_LIBRARY.hydro_water_bubble,
+            // file 11) — số liệu ĐÃ COPY NGUYÊN VẸN sang đó, không mất mát gì khi xóa khối này.
+            // Khác với ELEMENTAL_SKILL_CONFIG phía trên (VẪN GIỮ — đang là fallback thật sự đang
+            // hoạt động trong getActiveSkillAimConfig(), combat.js), BURST_CONFIG không có vai trò
+            // fallback nào vì Burst không có khái niệm Aim Mode cần fallback tương tự.
 
             // burstAimState.phase giữ nguyên 'idle' vĩnh viễn (Burst không còn Hold/Aim Mode) — vẫn giữ
             // object này lại vì canUseBurst() và các đoạn dọn dẹp state khi chết/đuối nước còn tham chiếu

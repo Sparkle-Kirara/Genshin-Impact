@@ -171,31 +171,78 @@
                 // ============================================================
                 // PARTY SYSTEM (Pre-Alpha v0.8.5) — dựng mesh cho TỪNG Character trong Party
                 // ============================================================
-                // buildCharacterMesh(bodyColor): dựng 1 bộ mesh HOÀN CHỈNH (body, visor, sword,
-                // slashWave, gliderGroup) — TÁCH RA từ khối code dựng playerGroup cũ (trước v0.8.5 chỉ
-                // dựng đúng 1 lần cho player duy nhất) để mỗi Character trong Party có bộ mesh RIÊNG,
-                // độc lập hoàn toàn (không dùng chung 1 THREE.Group) — đúng quyết định thiết kế Party:
-                // "mỗi Character có mesh riêng, ẩn/hiện khi switch". Thứ tự add() vào group PHẢI giữ
-                // NGUYÊN VẸN (body=children[0], visor=children[1]) vì rất nhiều nơi trong
-                // 08-physics-combat-camera-loop.js/combat.js truy cập player.mesh.children[0]/[1] trực
-                // tiếp theo thứ tự này (không tra theo tên) — đổi thứ tự sẽ làm sai animation.
-                // Trả về { group, sword, slashWave, gliderGroup } — switchToCharacter() dùng để cập
-                // nhật lại các con trỏ player.mesh/player.sword/player.slashWave/player.gliderGroup mỗi
-                // khi đổi Character đang điều khiển.
-                function buildCharacterMesh(bodyColor) {
-                    const playerGroup = new THREE.Group();
-                    const bodyGeo = new THREE.CylinderGeometry(0.4, 0.4, 1.8, 16);
-                    const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 1.0, metalness: 0.0 });
-                    const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-                    bodyMesh.position.y = 0; bodyMesh.castShadow = true; bodyMesh.receiveShadow = true;
-                    playerGroup.add(bodyMesh); // children[0] — KHÔNG đổi thứ tự
+                // Alpha v1.0 — Character Foundation: buildCharacterMesh() viết lại HOÀN TOÀN theo
+                // visual style CHÍNH THỨC của game — hình học tối giản kiểu Slime mở rộng, KHÔNG mô
+                // phỏng humanoid model: 1 sphere Core (đầu), 2 sphere LeftHand/RightHand, KHÔNG
+                // torso, KHÔNG chân, lơ lửng trên mặt đất. Weapon là CON của RightHand (không phải
+                // con ngang hàng playerGroup như bố cục cylinder cũ trước Alpha v1.0).
+                //
+                // Hierarchy mới:
+                //   playerGroup (root — KHÔNG đổi tên biến trả về "group", tránh phải sửa
+                //                initParty()/switchToCharacter() ngoài phạm vi cần thiết)
+                //   └── tiltRoot (Group MỚI — chịu trách nhiệm procedural tilt/lean hiện có; TRƯỚC
+                //       Alpha v1.0, 21 chỗ trong 08-physics-combat-camera-loop.js/combat.js tilt
+                //       trực tiếp player.mesh.children[0]/[1] THEO INDEX — đã sửa toàn bộ sang ghi
+                //       player.tiltRoot.rotation.* thay vì children[index], xem ghi chú ở các file đó)
+                //       ├── core (Sphere)
+                //       ├── leftHand (Sphere)
+                //       └── rightHand (Sphere)
+                //           └── weapon (sword — con của rightHand, transform tương đối theo
+                //               visualConfig.weaponGrip, KHÔNG còn transform tuyệt đối theo playerGroup)
+                //
+                // visor (khối mặt nhỏ) đã BỊ XÓA — không thuộc thiết kế Core/Hand/Hand mới (quyết
+                // định đã xác nhận, không phải sơ suất).
+                //
+                // Nhận `visualConfig` (object đầy đủ từ CHARACTER_ROSTER, xem 10-character-roster.js)
+                // thay vì tham số `bodyColor` đơn lẻ như trước — đọc toàn bộ cấu hình hình học
+                // (coreColor/handColor/coreRadius/handRadius/floatingHeight/vị trí từng bộ phận/
+                // weaponGrip) thay vì chỉ màu, đúng tinh thần data-driven: KHÔNG hard-code kích
+                // thước/vị trí một Character cụ thể vào hàm dựng mesh dùng chung cho MỌI Character.
+                //
+                // Trả về { group, tiltRoot, core, leftHand, rightHand, sword, slashWave, gliderGroup }
+                // — thêm tiltRoot/core/leftHand/rightHand so với trước, GIỮ NGUYÊN các field cũ
+                // (group/sword/slashWave/gliderGroup) để không phá initParty()/switchToCharacter()
+                // ngoài phạm vi cần thiết. switchToCharacter() dùng để cập nhật lại toàn bộ con trỏ
+                // player.* mỗi khi đổi Character đang điều khiển.
+                // ============================================================
+                // Weapon Visual System (data-driven) — buildWeaponMesh(weaponType)
+                // ============================================================
+                // Tách phần tạo GEOMETRY/MATERIAL của weapon ra khỏi buildCharacterMesh() — trước
+                // đây swordGeo/swordMat/sword được hard-code THẲNG trong buildCharacterMesh(), mọi
+                // Character (kể cả archer_test/weaponType:'bow') đều nhận CÙNG 1 hình dạng kiếm.
+                //
+                // Trách nhiệm: buildWeaponMesh() CHỈ trả về 1 THREE.Mesh đã có geometry+material
+                // đúng loại vũ khí, position/rotation LOCAL mặc định (0,0,0) — buildCharacterMesh()
+                // vẫn là nơi DUY NHẤT gán weaponGrip.position/rotation (đọc từ visualConfig) và
+                // rightHand.add(weapon), giữ đúng phân chia "geometry ở đây, attachment ở kia" để
+                // weaponGrip tiếp tục hoạt động giống hệt cho MỌI loại vũ khí — không cần biết bên
+                // trong buildWeaponMesh() dựng hình gì.
+                //
+                // weaponType không nhận diện được (typo/chưa implement) -> fallback về 'sword', AN
+                // TOÀN NGƯỢC 100% cho mọi character hiện có (traveler_hydro/test_character_anemo
+                // không khai báo weaponType trong roster -> undefined -> rơi vào default -> Sword y
+                // hệt trước khi có hệ thống này).
+                //
+                // Mở rộng sau này (polearm/claymore/catalyst/...): chỉ cần thêm 1 case mới trong
+                // switch bên dưới, KHÔNG đụng buildCharacterMesh() hay bất kỳ chỗ gọi nào khác.
+                function buildWeaponMesh(weaponType) {
+                    switch (weaponType) {
+                        case 'bow':
+                            return buildBowVisual();
+                        case 'polearm':
+                            return buildPolearmVisual();
+                        case 'sword':
+                        default:
+                            return buildSwordVisual();
+                    }
+                }
+                window.buildWeaponMesh = buildWeaponMesh;
 
-                    const visorGeo = new THREE.BoxGeometry(0.5, 0.2, 0.3);
-                    const visorMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 1.0, metalness: 0.0 });
-                    const visorMesh = new THREE.Mesh(visorGeo, visorMat);
-                    visorMesh.position.set(0, 0.5, 0.35); visorMesh.castShadow = true;
-                    playerGroup.add(visorMesh); // children[1] — KHÔNG đổi thứ tự
-
+                // buildSwordVisual(): NGUYÊN VẸN 100% geometry/material/translate-offset đã có trong
+                // buildCharacterMesh() trước đây — chỉ DI CHUYỂN vị trí code, KHÔNG đổi 1 con số nào
+                // (kể cả swordGeo.translate(0,0,0.725) bù trừ gốc tọa độ tại chuôi kiếm, xem chú thích
+                // gốc bên trong hàm). Sword visual/behavior của Character #1 GIỮ NGUYÊN tuyệt đối.
+                function buildSwordVisual() {
                     const swordGeo = new THREE.BoxGeometry(0.16, 0.04, 1.45, 1, 1, 6);
                     const posAttrSword = swordGeo.attributes.position;
                     for (let i = 0; i < posAttrSword.count; i++) {
@@ -205,19 +252,186 @@
                         const curveX = z * z * 0.08;
                         posAttrSword.setX(i, posAttrSword.getX(i) * wScale - curveX);
                     }
+                    // Alpha v1.0 — Character Foundation: BoxGeometry mặc định có TÂM tại gốc
+                    // (0,0,0), tức trước dòng translate() này, xoay/di chuyển sword.rotation/
+                    // sword.position sẽ xoay quanh ĐIỂM GIỮA lưỡi kiếm — không thuận tiện cho
+                    // animation Attack (vung kiếm cần xoay quanh CHUÔI, nơi tay cầm). Dịch toàn bộ
+                    // geometry +0.725 theo Z (= nửa chiều dài 1.45) để đầu CHUÔI (z=-0.725 trước khi
+                    // dịch, xác định bằng công thức wScale ở trên: z<=0.4 giữ nguyên bản rộng =
+                    // chuôi, z>0.4 thu hẹp dần = mũi) trở thành gốc tọa độ cục bộ (0,0,0) của Mesh.
+                    //
+                    // QUAN TRỌNG — HỆ QUẢ VỀ VỊ TRÍ HIỂN THỊ (khác với suy nghĩ ban đầu): translate()
+                    // đổi Ý NGHĨA của gốc cục bộ (0,0,0) — trước đây đại diện cho TÂM lưỡi kiếm, giờ
+                    // đại diện cho CHUÔI kiếm. Vì weaponGrip.position/rotation neo vào ĐÚNG điểm gốc
+                    // cục bộ này, toàn bộ hình dạng lưỡi kiếm sẽ HIỂN THỊ LỆCH ĐI khoảng nửa chiều dài
+                    // kiếm (~0.725 đơn vị theo hướng lưỡi) so với trước, NẾU weaponGrip.position giữ
+                    // nguyên giá trị cũ (vốn được tinh chỉnh cho trường hợp gốc ở giữa kiếm). Cần vào
+                    // 10-character-roster.js chỉnh lại weaponGrip.position cho từng nhân vật để bù trừ
+                    // độ lệch này, đưa lưỡi kiếm về đúng vị trí hiển thị mong muốn trên màn hình.
+                    swordGeo.translate(0, 0, 0.725);
                     swordGeo.computeVertexNormals();
 
                     const swordMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 1.0, metalness: 0.0 });
-                    const sword = new THREE.Mesh(swordGeo, swordMat);
+                    return new THREE.Mesh(swordGeo, swordMat);
+                }
 
-                    sword.position.set(0.6, -0.15, 0.15);
-                    sword.rotation.set(-Math.PI / 3, 0, Math.PI / 10);
-                    playerGroup.add(sword);
+                // buildBowVisual(): weapon visual MỚI cho weaponType:'bow' — placeholder đơn giản,
+                // KHÔNG cần đẹp/phức tạp (yêu cầu đã xác nhận), chỉ cần NHÌN RÕ LÀ 1 CÂY CUNG. Dùng
+                // Group (không phải 1 Mesh đơn) vì cung gồm 2 phần hình học khác nhau (thân cong +
+                // dây thẳng) — buildCharacterMesh() gắn NGUYÊN group này vào rightHand qua weaponGrip
+                // giống hệt cách gắn 1 Mesh đơn (THREE.Group cũng có position/rotation, tương thích
+                // 100% với rightHand.add(weapon) + weaponGrip.position/rotation.set() hiện có).
+                //
+                // Gốc cục bộ (0,0,0) của group đặt tại ĐIỂM GIỮA thân cung (tay cầm) — cùng TRIẾT LÝ
+                // với sword (gốc tại điểm cầm nắm, không phải điểm giữa hình học tổng thể) để
+                // weaponGrip.position/rotation của archer_test (10-character-roster.js) căn chỉnh tự
+                // nhiên, không cần bù trừ offset lệch phức tạp như sword.
+                function buildBowVisual() {
+                    const bowGroup = new THREE.Group();
+                    const bowMat = new THREE.MeshStandardMaterial({ color: 0x7c4a1e, roughness: 0.9, metalness: 0.05 });
+
+                    // Thân cung: nửa vòng TorusGeometry (arc = PI) làm đường cong đơn giản, dựng đứng
+                    // (xoay quanh trục Z 90°) rồi xoay quanh Y 90° để mặt cong hướng về phía trước —
+                    // đủ để nhận ra hình dạng cây cung mà không cần geometry tùy biến phức tạp.
+                    const limbRadius = 0.55;
+                    const limbGeo = new THREE.TorusGeometry(limbRadius, 0.025, 6, 16, Math.PI);
+                    const limbMesh = new THREE.Mesh(limbGeo, bowMat);
+                    // TorusGeometry mặc định vẽ arc quanh mặt phẳng XY, bắt đầu tại góc 0 (trục +X) —
+                    // xoay Z +90° để 2 đầu cung (2 điểm mút của nửa vòng tròn) nằm dọc trục Y (đầu
+                    // trên/đầu dưới cây cung, đúng hướng cầm tự nhiên), sau đó xoay Y +90° để mặt
+                    // cong của cung hướng ra trước player (dọc trục Z cục bộ) thay vì sang ngang.
+                    limbMesh.rotation.z = Math.PI / 2;
+                    limbMesh.rotation.y = Math.PI / 2;
+                    limbMesh.castShadow = true;
+                    bowGroup.add(limbMesh);
+
+                    // Dây cung: 1 đoạn thẳng mảnh nối 2 đầu mút thân cung — với arc = PI xoay như
+                    // trên, 2 đầu mút nằm tại (0, ±limbRadius, 0) trong hệ cục bộ của bowGroup (bán
+                    // kính TorusGeometry đo từ tâm arc, tâm arc trùng gốc bowGroup vì limbMesh không
+                    // dịch position). Dây đặt LÙI về phía sau thân cung 1 khoảng nhỏ (offset Z) để
+                    // không xuyên qua/trùng mặt phẳng thân cung, đúng hình dạng cây cung thật.
+                    const stringGeo = new THREE.CylinderGeometry(0.008, 0.008, limbRadius * 2, 4);
+                    const stringMat = new THREE.MeshBasicMaterial({ color: 0xe5e5e0 });
+                    const stringMesh = new THREE.Mesh(stringGeo, stringMat);
+                    // CylinderGeometry mặc định dựng đứng dọc trục Y — ĐÚNG hướng cần (nối 2 đầu mút
+                    // trên/dưới đã xác định ở trên), không cần xoay thêm, chỉ lùi nhẹ theo Z.
+                    stringMesh.position.set(0, 0, -0.05);
+                    bowGroup.add(stringMesh);
+
+                    return bowGroup;
+                }
+
+                // buildPolearmVisual(): Character #3 (Polearm) Validation — weapon visual MỚI cho
+                // weaponType:'polearm', ĐÚNG TINH THẦN buildBowVisual() ở trên (placeholder đơn giản,
+                // KHÔNG cần đẹp/phức tạp — spec mục 2 xác nhận "Polearm baseline chỉ cần đơn giản...
+                // không cần model 3D phức tạp"). Dùng Group (2 phần hình học: shaft + spearhead, ĐÚNG
+                // spec mục 2 "shaft, spearhead/blade") — tương thích 100% với cách buildCharacterMesh()
+                // gắn weapon vào rightHand qua weaponGrip.position/rotation (Group cũng có
+                // position/rotation, không cần code gắn kết riêng cho Polearm).
+                //
+                // Gốc cục bộ (0,0,0) của group đặt tại ĐIỂM CẦM (gần giữa shaft, hơi lệch về phía đuôi
+                // cán) — ĐÚNG TRIẾT LÝ sword/bow (gốc tại điểm cầm nắm tự nhiên, không phải điểm giữa
+                // hình học tổng thể) để weaponGrip.position/rotation của Character #3 test fixture
+                // (10-character-roster.js) căn chỉnh tự nhiên, không cần bù trừ offset lệch phức tạp.
+                //
+                // Kích thước: shaft dài hơn sword (1.45) rõ rệt để phân biệt bằng mắt ngay cả khi đứng
+                // yên (spec mục 15, Test 1-2: "Polearm mesh xuất hiện đúng", "không dùng Sword
+                // geometry") — polearm thật (Genshin) luôn dài hơn sword đáng kể.
+                function buildPolearmVisual() {
+                    const polearmGroup = new THREE.Group();
+                    const shaftLength = 2.1; // dài hơn sword (1.45) rõ rệt — phân biệt ngay bằng mắt
+                    const gripOffset = 0.5;  // điểm cầm cách đuôi cán 0.5 (không cầm ngay chính giữa,
+                                              // giống cách cầm giáo/thương thật — phần shaft phía TRƯỚC
+                                              // điểm cầm dài hơn phần phía SAU)
+
+                    // Shaft (cán): CylinderGeometry mảnh, dựng dọc trục Z cục bộ (Genshin polearm cầm
+                    // theo chiều dọc cơ thể khi idle — xoay -PI/2 quanh X để trục dài CylinderGeometry
+                    // mặc định theo Y chuyển sang theo Z).
+                    const shaftGeo = new THREE.CylinderGeometry(0.035, 0.035, shaftLength, 8);
+                    shaftGeo.rotateX(Math.PI / 2);
+                    // Dịch geometry để điểm cầm (gripOffset tính từ đuôi cán) trở thành gốc cục bộ —
+                    // ĐÚNG CÁCH sword.translate() đã làm (dòng ~269), chỉ khác trục (Z thay vì cũng Z
+                    // nhưng offset khác vì tỉ lệ cán/lưỡi khác nhau).
+                    shaftGeo.translate(0, 0, shaftLength / 2 - gripOffset);
+                    const shaftMat = new THREE.MeshStandardMaterial({ color: 0x4b3621, roughness: 0.85, metalness: 0.05 });
+                    const shaftMesh = new THREE.Mesh(shaftGeo, shaftMat);
+                    shaftMesh.castShadow = true;
+                    polearmGroup.add(shaftMesh);
+
+                    // Spearhead (mũi giáo): ConeGeometry đơn giản gắn tại đầu XA của shaft (đầu đối
+                    // diện đuôi cán) — vị trí Z = (shaftLength - gripOffset) tính từ gốc cục bộ vừa dịch
+                    // ở trên (đầu shaft, KHÔNG phải điểm cầm).
+                    const spearheadLength = 0.35;
+                    const spearheadGeo = new THREE.ConeGeometry(0.09, spearheadLength, 6);
+                    spearheadGeo.rotateX(Math.PI / 2);
+                    const spearheadMat = new THREE.MeshStandardMaterial({ color: 0xb8bcc4, roughness: 0.4, metalness: 0.7 });
+                    const spearheadMesh = new THREE.Mesh(spearheadGeo, spearheadMat);
+                    spearheadMesh.position.set(0, 0, (shaftLength - gripOffset) + spearheadLength / 2);
+                    spearheadMesh.castShadow = true;
+                    polearmGroup.add(spearheadMesh);
+
+                    return polearmGroup;
+                }
+
+                function buildCharacterMesh(visualConfig, weaponType) {
+                    const playerGroup = new THREE.Group();
+
+                    // tiltRoot: node trung gian RỖNG (không tự có geometry) — mọi procedural tilt/lean
+                    // (nghiêng khi bơi/rơi/đi/tấn công...) ghi rotation lên ĐÂY thay vì lên từng mesh
+                    // con riêng lẻ, để Core + 2 tay + Weapon nghiêng ĐỒNG BỘ như 1 khối.
+                    const tiltRoot = new THREE.Group();
+                    tiltRoot.position.set(0, visualConfig.floatingHeight, 0);
+                    playerGroup.add(tiltRoot);
+
+                    const coreGeo = new THREE.SphereGeometry(visualConfig.coreRadius, 16, 12);
+                    const coreMat = new THREE.MeshStandardMaterial({ color: visualConfig.coreColor, roughness: 1.0, metalness: 0.0 });
+                    const core = new THREE.Mesh(coreGeo, coreMat);
+                    core.position.set(visualConfig.corePosition.x, visualConfig.corePosition.y, visualConfig.corePosition.z);
+                    core.castShadow = true; core.receiveShadow = true;
+                    tiltRoot.add(core);
+
+                    const handGeo = new THREE.SphereGeometry(visualConfig.handRadius, 12, 10);
+                    const handMat = new THREE.MeshStandardMaterial({ color: visualConfig.handColor, roughness: 1.0, metalness: 0.0 });
+
+                    const leftHand = new THREE.Mesh(handGeo, handMat);
+                    leftHand.position.set(visualConfig.leftHandPosition.x, visualConfig.leftHandPosition.y, visualConfig.leftHandPosition.z);
+                    leftHand.castShadow = true;
+                    tiltRoot.add(leftHand);
+
+                    // rightHand dùng CHUNG handGeo (SphereGeometry không bị ghi transform trực tiếp lên
+                    // geometry, an toàn để 2 Mesh share 1 BufferGeometry) nhưng material RIÊNG bản sao —
+                    // không bắt buộc trong Alpha v1.0 (leftHand/rightHand luôn cùng màu theo handColor),
+                    // dùng chung handMat cũng an toàn; giữ đơn giản, không tự thêm phức tạp ngoài cần thiết.
+                    const rightHand = new THREE.Mesh(handGeo, handMat);
+                    rightHand.position.set(visualConfig.rightHandPosition.x, visualConfig.rightHandPosition.y, visualConfig.rightHandPosition.z);
+                    rightHand.castShadow = true;
+                    tiltRoot.add(rightHand);
+
+                    // Weapon Visual System (data-driven): geometry/material giờ đọc qua
+                    // buildWeaponMesh(weaponType) thay vì hard-code Sword tại đây — weaponType đến từ
+                    // rosterEntry.weaponType (xem 02-collision-and-stats-core.js, initParty()).
+                    // weaponType undefined (character chưa khai báo field này, VD traveler_hydro/
+                    // test_character_anemo) -> buildWeaponMesh(undefined) -> switch rơi vào default ->
+                    // Sword y hệt trước đây. Việc GẮN vào rightHand qua weaponGrip GIỮ NGUYÊN 100%
+                    // logic cũ, áp dụng đồng nhất cho MỌI loại vũ khí (Mesh đơn hay Group nhiều phần
+                    // như Bow đều có position/rotation, tương thích transform này).
+                    const sword = buildWeaponMesh(weaponType);
+
+                    // weapon là CON của rightHand — transform CỤC BỘ đọc từ visualConfig.weaponGrip
+                    // (tương đối so với tâm rightHand), KHÔNG còn transform tuyệt đối theo playerGroup
+                    // như bố cục cylinder cũ. Đây là "điểm attachment rõ ràng" cho animation Attack sau
+                    // này (vung kiếm = xoay rightHand hoặc sword quanh gốc gắn kết này).
+                    sword.position.set(visualConfig.weaponGrip.position.x, visualConfig.weaponGrip.position.y, visualConfig.weaponGrip.position.z);
+                    sword.rotation.set(visualConfig.weaponGrip.rotation.x, visualConfig.weaponGrip.rotation.y, visualConfig.weaponGrip.rotation.z);
+                    rightHand.add(sword);
 
                     const slashGeo = new THREE.RingGeometry(0.8, 1.6, 32, 1, 0, Math.PI);
                     const slashMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.75 });
                     const slash = new THREE.Mesh(slashGeo, slashMat);
                     slash.rotation.x = Math.PI / 2; slash.position.set(0, 0.2, 0.9); slash.visible = false;
+                    // slashWave KHÔNG thuộc phạm vi Character Foundation (không phải Core/Hand/Weapon)
+                    // — giữ nguyên làm con TRỰC TIẾP của playerGroup như bố cục cũ, KHÔNG di chuyển vào
+                    // tiltRoot (giữ đúng hành vi cũ, tránh thay đổi ngoài phạm vi cần thiết).
                     playerGroup.add(slash);
 
                     const gliderGroup = new THREE.Group();
@@ -275,12 +489,14 @@
 
                     gliderGroup.position.set(0, 0, 0);
                     gliderGroup.visible = false;
+                    // gliderGroup cũng KHÔNG thuộc phạm vi Character Foundation — giữ nguyên làm con
+                    // trực tiếp của playerGroup như bố cục cũ.
                     playerGroup.add(gliderGroup);
 
                     playerGroup.visible = false; // Mặc định ẩn — initParty() sẽ hiện đúng 1 mesh (active)
                     scene.add(playerGroup);
 
-                    return { group: playerGroup, sword, slashWave: slash, gliderGroup };
+                    return { group: playerGroup, tiltRoot, core, leftHand, rightHand, sword, slashWave: slash, gliderGroup };
                 }
                 window.buildCharacterMesh = buildCharacterMesh;
 
