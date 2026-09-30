@@ -900,3 +900,116 @@ body, html {
                 font-size: 16px;
             }
         }
+
+        /* ============================================================
+           ALPHA M7 — BỐ CỤC DI ĐỘNG: vùng an toàn, vùng chạm, màn hẹp / màn dọc
+           (đo bằng tools/tests/m7/mobile-layout.js — Tailwind thật, nhiều kích thước màn hình, giả lập tai thỏ)
+           ============================================================ */
+        /* Vùng an toàn (tai thỏ / camera đục lỗ / thanh home): index.html dùng viewport-fit=cover nên cảnh 3D phủ kín màn
+           hình, còn mọi điều khiển bám mép được lùi vào bằng env(safe-area-inset-*). Máy không tai thỏ / desktop: = 0. */
+        :root {
+            --safe-top: env(safe-area-inset-top, 0px);
+            --safe-right: env(safe-area-inset-right, 0px);
+            --safe-bottom: env(safe-area-inset-bottom, 0px);
+            --safe-left: env(safe-area-inset-left, 0px);
+        }
+        /* Không kéo-để-tải-lại / không "nảy" trang khi vuốt (Chrome Android, Safari 16+): trong game mọi cú vuốt là điều khiển. */
+        html, body { overscroll-behavior: none; }
+        /* Vùng 3D: trình duyệt không dùng cú chạm để cuộn / phóng to (kể cả chạm đúp phóng to trên iOS, nơi user-scalable=no
+           bị bỏ qua) — game tự xử lý mọi cú chạm ở đây (joystick / camera / pinch). */
+        #canvas-container { touch-action: none; }
+
+        /* HUD cảm ứng: khung chứa lùi vào vùng an toàn — cột nhân vật, joystick, nút Đi bộ, cụm nút chiến đấu dời theo. */
+        #mobile-controls { top: var(--safe-top); right: var(--safe-right); bottom: var(--safe-bottom); left: var(--safe-left); }
+
+        /* Joystick nghỉ ở BÊN PHẢI cột đổi nhân vật. Trước đây left 40px + z-index 40 -> vùng joystick đè 1/3 bên phải slot
+           2–4 (chạm vào đó mở joystick thay vì đổi nhân vật) ở mọi cỡ điện thoại nằm ngang. 84 = 12 (lề cột) + 56 (slot lớn
+           nhất) + 16. Joystick vẫn "động": chạm ở đâu nửa trái màn hình thì hiện ở đó như cũ. */
+        .joystick-zone { left: 84px; }
+
+        /* Cột đổi nhân vật co theo chiều cao màn hình: 4 slot 56px bắt đầu ở y=80 cần 328px — màn ngang 320px hoặc còn thanh
+           địa chỉ trình duyệt thì slot 4 nằm ngoài màn hình. Kích thước slot đọc từ biến này (ui.js, buildSlot). */
+        #party-switch-temp { --party-slot-size: 56px; gap: 8px; }
+        @media (max-height: 380px) { #party-switch-temp { --party-slot-size: 52px; gap: 6px; } }
+        @media (max-height: 340px) { #party-switch-temp { --party-slot-size: 46px; gap: 5px; top: 72px; } }
+        @media (max-height: 300px) { #party-switch-temp { --party-slot-size: 40px; gap: 4px; top: 68px; } }
+
+        /* Nút góc trên lùi vào vùng an toàn. */
+        #paimon-star-btn { top: calc(1rem + var(--safe-top)); left: calc(1rem + var(--safe-left)); }
+        #hud-top-right { top: calc(1rem + var(--safe-top)); right: calc(1rem + var(--safe-right)); }
+
+        /* Vùng nhận chạm >= 44px mà KHÔNG đổi kích thước nhìn thấy (nút Túi đồ / Nhân vật giữ 40px theo yêu cầu chỉnh UI
+           trước đây; nút Đi bộ giữ dạng viên thuốc cao 24px): phần tử giả trong suốt nới rộng vùng nhận chạm của chính nút. */
+        #backpack-btn, #character-btn { position: relative; }
+        #backpack-btn::before, #character-btn::before { content: ''; position: absolute; inset: -4px; border-radius: 9999px; }
+        /* position: absolute ghi lại ở đây (trùng với lớp Tailwind `absolute` của nút): nếu Tailwind không nạp được (CDN bị chặn /
+           offline, hoặc stub trong test) nút không còn là khung chứa của ::before -> vùng chạm phủ CẢ MÀN HÌNH (Alpha M9, KI-337). */
+        #mobile-walk-toggle { position: absolute; }
+        #mobile-walk-toggle::before { content: ''; position: absolute; top: -11px; bottom: -11px; left: -4px; right: -4px; border-radius: 9999px; }
+
+        /* Thanh HP: lùi khỏi thanh home. Cảm ứng + màn ngang hẹp: nằm GIỮA joystick và cụm nút chiến đấu (trước đây rộng 288px
+           cố định -> ở 568px nút Burst che số HP). Màn dọc: đưa lên trên cụm điều khiển ngón cái (cao ~240px). */
+        #player-hp-bar { bottom: calc(1.5rem + var(--safe-bottom)); }
+        .touch-ui #player-hp-bar { width: clamp(9.5rem, calc(100vw - 25rem - var(--safe-left) - var(--safe-right)), 18rem); }
+        @media (orientation: portrait) {
+            .touch-ui #player-hp-bar { bottom: calc(15.5rem + var(--safe-bottom)); width: min(18rem, calc(100vw - 2rem)); }
+        }
+
+        /* Các lớp phủ bám mép khác: khung Thử Thách, hội thoại, lựa chọn, thông báo phần thưởng, cửa sổ con và thanh bên
+           Paimon Menu, màn hình tiêu đề. (html #encounter-hud: thắng style do 15-encounter-system.js chèn vào sau.) */
+        /* Giữ đúng 3 mức top của khung Thử Thách (15-encounter-system.js: 12px; màn <= 900px rộng hoặc <= 480px cao: 8px; màn
+           dọc <= 560px rộng: 62px — dưới hàng nút góc trên) rồi cộng vùng an toàn. (Bản đầu của M7 chỉ ghi 1 mức 12px nên ở màn
+           dọc khung đè nút Túi đồ — m2/encounter-ui.js U3 bắt được ở hồi quy cuối, KI-338.) */
+        html #encounter-hud { top: calc(12px + var(--safe-top)); }
+        @media (max-width: 900px), (max-height: 480px) { html #encounter-hud { top: calc(8px + var(--safe-top)); } }
+        @media (max-width: 560px) { html #encounter-hud { top: calc(62px + var(--safe-top)); } }
+        #dialogue-box { padding-left: calc(1rem + var(--safe-left)); padding-right: calc(1rem + var(--safe-right)); padding-bottom: calc(1.5rem + var(--safe-bottom)); }
+        #dialogue-choices-container { right: calc(1rem + var(--safe-right)); }
+        #reward-popup-container { left: calc(1rem + var(--safe-left)); }
+        #menu-left-panel { padding-left: var(--safe-left); padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
+        #rpg-sub-window { padding-left: max(0.75rem, var(--safe-left)); padding-right: max(0.75rem, var(--safe-right)); padding-bottom: max(0.75rem, var(--safe-bottom)); }
+        @media (min-width: 640px) { #rpg-sub-window { padding-left: max(1.5rem, var(--safe-left)); padding-right: max(1.5rem, var(--safe-right)); padding-bottom: max(1.5rem, var(--safe-bottom)); } }
+        @media (min-width: 768px) {
+            #dialogue-box { padding-bottom: calc(2.5rem + var(--safe-bottom)); }
+            #dialogue-choices-container { right: calc(2.5rem + var(--safe-right)); }
+            #rpg-sub-window { padding-left: max(2rem, var(--safe-left)); padding-right: max(2rem, var(--safe-right)); padding-bottom: max(2rem, var(--safe-bottom)); }
+        }
+        .top-status-bar { top: calc(24px + var(--safe-top)); right: calc(32px + var(--safe-right)); }
+        .bottom-right-utilities { bottom: calc(40px + var(--safe-bottom)); right: calc(40px + var(--safe-right)); }
+        @media (max-width: 768px) {
+            .bottom-right-utilities { bottom: calc(24px + var(--safe-bottom)); right: calc(24px + var(--safe-right)); }
+        }
+        /* Paimon Menu, dải biểu tượng bên trái: màn thấp (<= 400px, điện thoại nằm ngang) thu khoảng cách để nút Thoát
+           (#close-menu-btn, cuối dải) không bị ép còn 0px — trước đây ở 320px không còn nút về Màn Hình Chính. */
+        #close-menu-btn { flex-shrink: 0; }
+        @media (max-height: 400px) {
+            #menu-utility-strip { padding-top: 12px; padding-bottom: 12px; }
+            #menu-utility-strip > div:first-child { gap: 12px; }
+        }
+        @media (max-height: 330px) {
+            #menu-utility-strip > div:first-child { gap: 8px; }
+        }
+        /* Cửa sổ con Paimon Menu khi ẩn nằm lệch xuống 32px (translate-y-8) -> trang có thể cuộn thêm ~9px trên điện thoại
+           nằm ngang (document cao hơn màn hình). Cắt phần lệch đó; khi mở, khung vẫn nằm gọn như cũ. */
+        #rpg-sub-window { overflow: hidden; }
+        /* Màn hình tử vong khi ẨN (#death-screen có lớp pointer-events-none): nút Hồi sinh bên trong vẫn có pointer-events-auto
+           nên dù trong suốt nó vẫn "ăn" cú chạm ở giữa-dưới màn hình (màn ngang: vùng khởi động joystick / camera; màn dọc:
+           đè joystick và nút Burst — phát hiện bằng hit-test M7). Chỉ nhận chạm khi màn hình tử vong thật sự hiện. */
+        #death-screen.pointer-events-none #death-screen-revive-btn { pointer-events: none; }
+        /* Nút tương tác (F) trên cảm ứng — Alpha M9 (KI-339, m4/ui-layout.js U3/U4 ở hồi quy cuối). Màn ngang hẹp (< 736 px)
+           hoặc thấp (<= 360 px): nút ~290 px ở giữa-dưới đè lên chỗ nghỉ joystick (M7 dời sang x 84–214), còn nếu nâng lên thì
+           chạm tracker khi có 3 nhiệm vụ (cao ~180 px) -> đặt nút trong dải giữa cột joystick (222 px) và nút Burst (cách mép
+           phải 184 px), ngay trên thanh HP (đáy 68 px); chữ dài bị cắt "…" thay vì tràn lên điều khiển. Màn dọc: đặt trên
+           thanh HP (trước đây nút đè joystick / Skill). */
+        @media (orientation: landscape) and (max-width: 735px), (orientation: landscape) and (max-height: 360px) {
+            .touch-ui #interact-prompt { left: calc(222px + var(--safe-left)); right: calc(184px + var(--safe-right)); bottom: calc(68px + var(--safe-bottom)); transform: none; display: flex; justify-content: center; }
+            .touch-ui #interact-prompt.hidden { display: none; }
+            .touch-ui #interact-prompt-btn { max-width: 100%; min-width: 0; }
+            .touch-ui #interact-prompt-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        }
+        @media (orientation: portrait) { .touch-ui #interact-prompt { bottom: calc(18.5rem + var(--safe-bottom)); } }
+        /* Alpha M7 (hiệu năng, đo bằng document.getAnimations()): Paimon Menu khi ĐÓNG chỉ trong suốt (opacity-0), không bị
+           ẩn hẳn — ~20 hiệu ứng CSS lặp vô hạn bên trong (chòm sao phát sáng đổi stroke-width, chấm nhấp nháy, lấp lánh, biểu
+           tượng giọt nước) vẫn chạy mỗi khung hình trong lúc chơi -> 1 lần tính lại style mỗi khung. Tạm dừng chúng khi menu
+           và cửa sổ con đang đóng; mở menu là chạy tiếp như cũ. */
+        #game-menu.opacity-0 *, #rpg-sub-window.opacity-0 * { animation-play-state: paused; }
