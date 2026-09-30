@@ -2,7 +2,9 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- Alpha M7: viewport-fit=cover — cảnh 3D phủ kín cả phần tai thỏ / camera đục lỗ; HUD tự lùi vào vùng an toàn bằng
+         env(safe-area-inset-*) (xem khối "ALPHA M7 — BỐ CỤC DI ĐỘNG" cuối style/style.css). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Genshin Impact Alpha v1.0</title>
     <!-- FLAG: OPENING / TITLE SCREEN ĐANG HIỂN THỊ (Pre-Alpha v0.9) -->
     <!-- Đặt SỚM NHẤT CÓ THỂ (đầu <head>, trước MỌI script khác) — độc lập với thứ tự load của 8 file
@@ -30,7 +32,7 @@
     <!-- Font Awesome cho icon -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="style/style.css">
-    <link rel="icon" type="png" href="assets/icons/Genshin_Impact.png">
+    <link rel="icon" type="image/png" href="assets/icons/Genshin_Impact.png">
 </head>
 <body>
     <!-- ============================================================ -->
@@ -49,7 +51,8 @@
                 <i class="fa-solid fa-wifi"></i>
                 <span>24ms</span>
             </div>
-            <div>Ver. 4.8_LIVE</div>
+            <!-- Alpha M9: số phiên bản thật (trước đây là một số phiên bản giả kiểu game live — KI-303); khớp <title>, Paimon Menu và file VERSION. -->
+            <div id="game-version-label">Alpha v1.0</div>
             <div id="audio-toggle-btn" class="utility-btn" style="width: 32px; height: 32px; font-size: 12px; border-radius: 50%;" title="Toggle Sound">
                 <i class="fa-solid fa-volume-high" id="audio-icon"></i>
             </div>
@@ -214,7 +217,7 @@
          kích thước gốc (w-12/h-12 = 3rem -> w-10/h-10 = 2.5rem) theo yêu cầu điều chỉnh UI. Dùng
          chung window.openInventoryQuick()/window.openCharacterQuick() (ui.js) để hành vi mở menu nhất
          quán với việc mở từ Paimon Menu. -->
-    <div class="absolute top-4 right-4 z-40 flex flex-row gap-2 pointer-events-none">
+    <div id="hud-top-right" class="absolute top-4 right-4 z-40 flex flex-row gap-2 pointer-events-none">
         <button id="backpack-btn" onclick="openInventoryQuick()" class="w-10 h-10 rounded-full flex items-center justify-center bg-[#110f1e]/85 border border-[#ebdcb9]/40 text-[#ebdcb9] shadow-[0_4px_12px_rgba(0,0,0,0.5)] transition-all duration-300 hover:border-[#ebdcb9] hover:text-[#fff4db] hover:shadow-[0_0_15px_rgba(235,220,185,0.4)] pointer-events-auto active:scale-95">
             <i class="fa-solid fa-briefcase text-base select-none"></i>
         </button>
@@ -339,8 +342,8 @@
         <!-- LEFT SIDEBAR UI PANEL (Deep Indigo, Muted Lavender & Slate Gray Gradient) -->
         <div id="menu-left-panel" class="relative z-20 w-[88%] sm:w-[480px] md:w-[40%] lg:w-[38%] h-full bg-gradient-to-b from-[#110f1e]/98 via-[#17142b]/98 to-[#110f1e]/98 border-r border-[#2d284f]/60 flex flex-row shadow-[15px_0_45px_rgba(0,0,0,0.6)] transform -translate-x-full transition-transform duration-300 ease-out">
             
-            <!-- FAR-LEFT NARROW UTILITY SIDEBAR STRIP -->
-            <div class="w-14 sm:w-16 h-full bg-[#090812] border-r border-[#1a172b] flex flex-col justify-between items-center py-6 text-[#8b83ab]">
+            <!-- FAR-LEFT NARROW UTILITY SIDEBAR STRIP (id từ Alpha M7: màn thấp thu khoảng cách — xem cuối style.css) -->
+            <div id="menu-utility-strip" class="w-14 sm:w-16 h-full bg-[#090812] border-r border-[#1a172b] flex flex-col justify-between items-center py-6 text-[#8b83ab]">
                 <div class="flex flex-col gap-6 items-center">
                     <!-- Brand elemental emblem -->
                     <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-[#1E4D7A] to-[#3BA3FF] flex items-center justify-center text-white shadow-md">
@@ -438,10 +441,10 @@
                                 <span class="text-[9px] tracking-wide font-bold text-[#f7e8cf]">Comic</span>
                                 <span class="menu-notif-dot"></span>
                             </div>
-                            <!-- Team Setup -->
-                            <div class="menu-grid-btn" onclick="openMenuSubSection('team')">
+                            <!-- Party Setup (Task 92641 — trước đây "Team", Coming Soon) -->
+                            <div class="menu-grid-btn" onclick="openMenuSubSection('party')">
                                 <i class="fa-solid fa-users text-lg mb-1 text-slate-300"></i>
-                                <span class="text-[9px] tracking-wide font-medium">Team</span>
+                                <span class="text-[9px] tracking-wide font-medium">Party</span>
                             </div>
                             <!-- Crafting -->
                             <div class="menu-grid-btn" onclick="openMenuSubSection('craft')">
@@ -877,8 +880,8 @@
 
     </div>
 
-    <!-- HỆ THỐNG THANH MÁU PLAYER -->
-    <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 w-72 max-w-[90vw] px-4 py-2.5 bg-stone-900/80 border border-amber-900/30 backdrop-blur-md rounded-full shadow-2xl flex items-center space-x-3 pointer-events-none transition-all">
+    <!-- HỆ THỐNG THANH MÁU PLAYER (id từ Alpha M7 — vị trí/độ rộng theo màn hình: xem cuối style/style.css) -->
+    <div id="player-hp-bar" class="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 w-72 max-w-[90vw] px-4 py-2.5 bg-stone-900/80 border border-amber-900/30 backdrop-blur-md rounded-full shadow-2xl flex items-center space-x-3 pointer-events-none transition-all">
         <span class="text-[10px] font-bold text-amber-400 tracking-wider">HP</span>
         <div class="flex-1 h-3.5 bg-stone-950 rounded-full overflow-hidden border border-stone-800">
             <div id="hp-fill" class="h-full bg-emerald-600 rounded-full transition-all duration-150" style="width: 100%;"></div>
@@ -1090,7 +1093,8 @@
             <div id="joystick-handle" class="joystick-handle"></div>
         </div>
 
-        <button id="mobile-walk-toggle" class="combat-btn absolute pointer-events-auto z-30 flex items-center gap-1.5 px-3 py-1.5 bg-stone-850/80 border border-amber-900/30 rounded-full text-stone-300 shadow-lg select-none" style="bottom: 188px; left: 40px;">
+        <!-- Alpha M7: left 40px -> 84px — cùng cột với joystick, không còn đè slot 1/2 của cột đổi nhân vật. -->
+        <button id="mobile-walk-toggle" class="combat-btn absolute pointer-events-auto z-30 flex items-center gap-1.5 px-3 py-1.5 bg-stone-850/80 border border-amber-900/30 rounded-full text-stone-300 shadow-lg select-none" style="bottom: 188px; left: 84px;">
             <i id="mobile-walk-icon" class="fa-solid fa-person-walking text-sm"></i>
             <span id="mobile-walk-label" class="text-[10px] font-bold tracking-wide leading-none">WALK</span>
         </button>
@@ -1110,8 +1114,9 @@
                 <div id="mobile-burst-water" class="absolute bottom-0 left-0 right-0 rounded-b-full pointer-events-none" style="height:0%; background:linear-gradient(to top, rgba(30,77,122,0.65), rgba(110,198,255,0.45)); transition: height 0.18s ease-out;"></div>
                 <div id="mobile-burst-ripple" class="absolute left-0 right-0 h-0.5 pointer-events-none opacity-0" style="background: rgba(110,198,255,0.7); transition: top 0.18s ease-out; top: 50%;"></div>
                 <i class="fa-solid fa-droplet text-xl relative z-10" id="mobile-burst-icon"></i>
-                <span class="text-[7px] font-bold mt-0.5 leading-none relative z-10" id="mobile-burst-label">BURST</span>
-                <span class="text-[7px] font-mono leading-none relative z-10 opacity-70 mt-0.5" id="mobile-burst-energy-text">0/40</span>
+                <!-- Alpha M7: chữ 7px -> 9px / 8px (cùng cỡ với nút Burst desktop) — 7px quá nhỏ để đọc trên điện thoại. -->
+                <span class="text-[9px] font-bold mt-0.5 leading-none relative z-10" id="mobile-burst-label">BURST</span>
+                <span class="text-[8px] font-mono leading-none relative z-10 opacity-70 mt-0.5" id="mobile-burst-energy-text">0/40</span>
             </button>
 
             <button id="mobile-dash-btn" class="combat-btn absolute bottom-24 right-0 w-14 h-14 bg-stone-850/90 border-2 border-stone-750/50 rounded-full flex items-center justify-center text-white pointer-events-auto shadow-xl z-20">
@@ -1186,6 +1191,22 @@
          09 — 11 đã load từ trước (dòng 1164) nên an toàn. -->
     <script src="scripts/game/12-energy-system.js"></script>
 
+    <!-- Alpha M2/M3 — Enemy Framework & Encounter Loop. 13 = dữ liệu cân bằng (quái + encounter, chỉ data);
+         14 = khung quái dùng chung (FieldEnemy + 3 archetype + đạn của quái); 15 = encounter (trạng thái, cột sáng
+         bắt đầu, theo dõi quái, thưởng, HUD). Cả 3 chỉ dùng biến global lúc RUNTIME (initThree()/animate()), riêng 15
+         kế thừa class Interactable (01) lúc parse nên PHẢI load sau 01. -->
+    <script src="scripts/game/13-enemy-definitions.js"></script>
+    <script src="scripts/game/14-enemy-framework.js"></script>
+    <script src="scripts/game/15-encounter-system.js"></script>
+
+    <!-- Alpha M4/M6 — Thế giới & nhiệm vụ. 16 = GameEvents + WorldState (tiến trình thế giới có lưu, vùng khám phá,
+         biên khu vực chơi); 17 = điểm tham quan của vùng Alpha (Tháp Canh Cổ, bia đá, rương thế giới, NPC Trinh sát
+         Arin, đèn lồng) — kế thừa Interactable/NPC/Chest (01) nên PHẢI load sau 01; 18 = nhiệm vụ chính Alpha
+         (mục tiêu theo sự kiện, tracker, dấu mục tiêu, trang Nhiệm Vụ). Khởi tạo từ initThree() (04). -->
+    <script src="scripts/game/16-world-state.js"></script>
+    <script src="scripts/game/17-world-poi.js"></script>
+    <script src="scripts/game/18-story-quest.js"></script>
+
     <!-- Script Combat (Plunge/Attack/Elemental Skill/Burst) — PHẢI load SAU game.js: dùng trực tiếp
          nhiều biến/hằng số khai báo trong game.js (player, scene, camera, particles, enemies, sfx,
          cameraState, skillAimState, burstAimState, các CONFIG...). Xem chi tiết ở đầu combat.js. -->
@@ -1193,6 +1214,10 @@
 
     <!-- Script UI (menu, HUD, touch controls) — phụ thuộc game.js/combat.js, load sau cùng -->
     <script src="scripts/ui.js"></script>
+
+    <!-- Alpha M7-P0: bảng đo hiệu năng — CHỈ bật khi URL có ?perf=1 (không có thì file return ngay, không tạo gì).
+         animate() (08) gọi perfHud.frameStart / renderStart / frameEnd trong chính vòng lặp của nó. -->
+    <script src="scripts/perf-hud.js"></script>
 
     <!-- Script chính: setup DOM refs, settings, khởi tạo -->
     <script>
@@ -1482,8 +1507,11 @@
             Object.defineProperty(window, 'renderer', { get: () => renderer, set: (v) => { renderer = v; }, configurable: true });
             Object.defineProperty(window, 'groundMat', { get: () => groundMat, set: (v) => { groundMat = v; }, configurable: true });
 
-            window.isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+            // Alpha M7 (KI-301): cùng 1 quy tắc với ui.js — theo con trỏ chính (xem window.detectTouchPrimaryDevice).
+            window.isMobile = window.detectTouchPrimaryDevice ? window.detectTouchPrimaryDevice() : ('ontouchstart' in window || navigator.maxTouchPoints > 0);
             const isMobile = window.isMobile;
+            // Alpha M7: lớp .touch-ui trên <html> cho các quy tắc CSS riêng của HUD cảm ứng (thanh HP màn hẹp / màn dọc).
+            document.documentElement.classList.toggle('touch-ui', isMobile);
             if (isMobile) {
                 mobileControls.classList.remove('hidden');
                 desktopHud.classList.add('hidden');
@@ -1511,14 +1539,14 @@
 
             window.openMenuSubSection = function(sectionId) {
                 // Hide all sub-sections in the sub window
-                const subSections = ['settings', 'info', 'comic', 'skills-overview', 'inventory', 'character', 'locked'];
+                const subSections = ['settings', 'info', 'comic', 'skills-overview', 'inventory', 'character', 'party', 'quests', 'locked'];
                 subSections.forEach(s => {
                     const el = document.getElementById('menu-content-' + s);
                     if (el) el.classList.add('hidden');
                 });
 
                 let title = "Travel Journal";
-                const validSections = ['settings', 'info', 'comic', 'skills-overview', 'inventory', 'character'];
+                const validSections = ['settings', 'info', 'comic', 'skills-overview', 'inventory', 'character', 'party', 'quests'];
 
                 if (validSections.includes(sectionId)) {
                     const targetEl = document.getElementById('menu-content-' + sectionId);
@@ -1544,6 +1572,18 @@
                         // Render lại toàn bộ Character Screen mỗi lần mở — đảm bảo luôn khớp state mới
                         // nhất (level/exp/stats có thể đã đổi từ lần mở trước, VD vừa lên level).
                         if (window.renderCharacterScreen) window.renderCharacterScreen();
+                    }
+                    else if (sectionId === 'party') {
+                        // Task 92641 — Party Setup: dựng lại từ Party state thật mỗi lần mở (bản nháp cũ bị bỏ).
+                        title = "Party Setup";
+                        if (window.renderPartySetup) window.renderPartySetup();
+                    }
+                    else if (sectionId === 'quests') {
+                        // Alpha M6 — trang Nhiệm Vụ: vẽ lại từ state nhiệm vụ thật mỗi lần mở (chỉ đọc).
+                        title = "Nhiệm Vụ";
+                        if (window.renderQuestJournal) window.renderQuestJournal();
+                        const questsEl = document.getElementById('menu-content-quests');
+                        if (questsEl) questsEl.classList.remove('hidden');
                     }
                     
                     activeWindow = sectionId;
@@ -1886,9 +1926,11 @@
 
             // Sinh danh sách đường dẫn đầy đủ từ 1 config { folder, prefix, quantity } — vòng lặp
             // JS tương đương hàm Python bạn đưa, chỉ khác đánh số bắt đầu từ 1 (ost1) thay vì 0.
+            // Alpha M8 (KI-306): vòng lặp từng chạy tới quantity + 1 -> luôn có 1 đường dẫn KHÔNG tồn tại mỗi thư mục
+            // (bg_ost/ost10.mp3, combat_ost/ost9.mp3): ~1/10 lần chọn bài là im lặng cả đoạn + lỗi 404 trong console.
             function buildTrackList(config) {
                 const list = [];
-                for (let i = 1; i <= config.quantity + 1; i++) {
+                for (let i = 1; i <= config.quantity; i++) {
                     list.push(`${config.folder}/${config.prefix}${i}.mp3`);
                 }
                 return list;
@@ -2126,15 +2168,24 @@
             window.runOpeningFlow();
         };
     </script>
-<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-<script>
-    eruda.init();
-</script>
+    <!-- CÔNG CỤ DEBUG TRÊN ĐIỆN THOẠI (eruda) — Alpha M7/M8: chỉ nạp khi bật chủ động. Trước đây luôn nạp từ CDN (thẻ
+         script đồng bộ cuối trang: trang chờ CDN mới chạy onload -> Opening; CDN không tới được thì eruda.init() báo lỗi
+         mỗi lần mở game) và nút nổi của eruda (mặc định ở góc dưới phải) nằm đè cụm nút chiến đấu trên điện thoại.
+         Bật: mở game với ?debug=1 (được nhớ trong trình duyệt này), tắt: ?debug=0. Đồng thời xoá đoạn markup thừa từng
+         nằm sau thẻ đóng html (hiện thành chữ "ml> > ml> body>" ở cuối trang). -->
+    <script>
+        (function () {
+            var KEY = 'genshinFanGame_debugConsole';
+            try {
+                var m = /[?&]debug=([01])\b/.exec(window.location.search);
+                if (m) { if (m[1] === '1') localStorage.setItem(KEY, '1'); else localStorage.removeItem(KEY); }
+                if (localStorage.getItem(KEY) !== '1') return;
+            } catch (e) { return; }
+            var s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/eruda';
+            s.onload = function () { if (window.eruda) window.eruda.init(); };
+            document.body.appendChild(s);
+        })();
+    </script>
 </body>
 </html>
-ml>
->
-ml>
-body>
-</html>
-ml>
