@@ -111,8 +111,11 @@
                 for (let i = 0; i < posAttr.count; i++) {
                     const vx = posAttr.getX(i);
                     const vy = posAttr.getY(i);
-                    // Sau khi Plane được xoay -90 độ quanh trục X, local X giữ nguyên, local Y trở thành world Z
-                    const height = getTerrainHeight(vx, vy);
+                    // Sau khi Plane được xoay -90 độ quanh trục X, local X giữ nguyên, còn local Y trở thành world Z
+                    // với DẤU NGƯỢC (xoay -90° quanh X: y_local -> z_world = -y_local). Alpha M4 (KI-122): trước đây
+                    // gọi getTerrainHeight(vx, vy) -> mặt đất NHÌN THẤY là mặt đất va chạm lật theo trục Z (đồi, lòng hồ,
+                    // đường mòn hiện ở vị trí đối xứng; người/quái/đồ vật trông lún hoặc lơ lửng). Lấy đúng z thế giới.
+                    const height = getTerrainHeight(vx, -vy);
                     posAttr.setZ(i, height); // Z chính là cao độ (elevation) trước khi xoay Plane
                 }
                 groundGeo.computeVertexNormals();
@@ -219,7 +222,7 @@
                 // trong buildWeaponMesh() dựng hình gì.
                 //
                 // weaponType không nhận diện được (typo/chưa implement) -> fallback về 'sword', AN
-                // TOÀN NGƯỢC 100% cho mọi character hiện có (traveler_hydro/test_character_anemo
+                // TOÀN NGƯỢC 100% cho mọi character hiện có (VD traveler_hydro
                 // không khai báo weaponType trong roster -> undefined -> rơi vào default -> Sword y
                 // hệt trước khi có hệ thống này).
                 //
@@ -231,12 +234,63 @@
                             return buildBowVisual();
                         case 'polearm':
                             return buildPolearmVisual();
+                        case 'claymore':
+                            return buildClaymoreVisual();
+                        case 'catalyst':
+                            return buildCatalystVisual();
                         case 'sword':
                         default:
                             return buildSwordVisual();
                     }
                 }
                 window.buildWeaponMesh = buildWeaponMesh;
+
+                // Character #5 — Trọng kiếm (placeholder procedural, KHÔNG dùng asset ngoài). Cùng quy ước với
+                // kiếm: gốc cục bộ tại CHUÔI, lưỡi chạy theo +Z (weaponGrip của nhân vật neo vào điểm này).
+                // Lưỡi rộng/dày/dài hơn kiếm đơn (~2.05 đơn vị) + chắn tay ngang + chuôi, để nhìn ra "nặng".
+                function buildClaymoreVisual() {
+                    const g = new THREE.Group();
+                    const steel = new THREE.MeshStandardMaterial({ color: 0x9ca3af, roughness: 0.55, metalness: 0.35 });
+                    const dark = new THREE.MeshStandardMaterial({ color: 0x3f3f46, roughness: 0.9, metalness: 0.1 });
+                    const bladeGeo = new THREE.BoxGeometry(0.34, 0.08, 1.75, 1, 1, 4);
+                    const pos = bladeGeo.attributes.position;
+                    for (let i = 0; i < pos.count; i++) {           // mũi vát nhọn ở đầu lưỡi
+                        const z = pos.getZ(i);
+                        if (z > 0.6) pos.setX(i, pos.getX(i) * (1 - (z - 0.6) * 0.8));
+                    }
+                    bladeGeo.translate(0, 0, 0.30 + 0.875);          // lưỡi bắt đầu sau chắn tay
+                    bladeGeo.computeVertexNormals();
+                    const blade = new THREE.Mesh(bladeGeo, steel);
+                    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.12, 0.12), dark);
+                    guard.position.set(0, 0, 0.26);
+                    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.36), dark);
+                    grip.position.set(0, 0, 0.02);
+                    [blade, guard, grip].forEach(m => { m.castShadow = true; g.add(m); });
+                    g.userData.tip = blade;
+                    g.userData.tipLocal = { x: 0, y: 0, z: 1.95 };  // vệt vũ khí theo mũi trọng kiếm
+                    return g;
+                }
+
+                // Character #6 — Pháp khí (placeholder procedural): cuốn sách nhỏ + quả cầu sáng lơ lửng phía trên.
+                // Quả cầu là "mũi" để vẽ vệt/điểm phóng. emissive gốc lưu ở userData.baseEmissive để
+                // setWeaponEmissive(0) (file 08) trả về đúng ánh sáng gốc thay vì tắt hẳn.
+                function buildCatalystVisual() {
+                    const g = new THREE.Group();
+                    const cover = new THREE.MeshStandardMaterial({ color: 0x6b2150, roughness: 0.8, metalness: 0.05 });
+                    const pages = new THREE.MeshStandardMaterial({ color: 0xf5f0e6, roughness: 1.0, metalness: 0.0 });
+                    const book = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.08, 0.44), cover);
+                    const paper = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.06, 0.40), pages);
+                    paper.position.set(0.02, 0, 0);
+                    const orbMat = new THREE.MeshStandardMaterial({ color: 0xfbcfe8, emissive: 0xf472b6, emissiveIntensity: 1.2, roughness: 0.3 });
+                    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 8), orbMat);
+                    orb.position.set(0, 0.26, 0.05);
+                    orb.userData.baseEmissive = 0xf472b6;
+                    orb.userData.isWeaponTip = true;
+                    [book, paper, orb].forEach(m => { m.castShadow = true; g.add(m); });
+                    g.userData.tip = orb;
+                    g.userData.tipLocal = { x: 0, y: 0, z: 0 };
+                    return g;
+                }
 
                 // buildSwordVisual(): NGUYÊN VẸN 100% geometry/material/translate-offset đã có trong
                 // buildCharacterMesh() trước đây — chỉ DI CHUYỂN vị trí code, KHÔNG đổi 1 con số nào
@@ -272,7 +326,12 @@
                     swordGeo.computeVertexNormals();
 
                     const swordMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 1.0, metalness: 0.0 });
-                    return new THREE.Mesh(swordGeo, swordMat);
+                    const swordMesh = new THREE.Mesh(swordGeo, swordMat);
+                    // Task 3 (Combat VFX): điểm mũi kiếm (toạ độ cục bộ, geometry đã dịch gốc về chuôi,
+                    // lưỡi dài 1.45) — updateCharacterCombatVisuals() đọc để vẽ vệt kiếm. Không đổi hình.
+                    swordMesh.userData.tip = swordMesh;
+                    swordMesh.userData.tipLocal = { x: 0, y: 0, z: 1.35 };
+                    return swordMesh;
                 }
 
                 // buildBowVisual(): weapon visual MỚI cho weaponType:'bow' — placeholder đơn giản,
@@ -368,6 +427,11 @@
                     const spearheadMesh = new THREE.Mesh(spearheadGeo, spearheadMat);
                     spearheadMesh.position.set(0, 0, (shaftLength - gripOffset) + spearheadLength / 2);
                     spearheadMesh.castShadow = true;
+                    // Readability Batch: đánh dấu mũi giáo — buildCharacterMesh() tô màu nguyên tố
+                    // (visualConfig.weaponAccentColor) và 09-character-system.js lấy vị trí world của
+                    // nó để vẽ vệt đường đâm (attackTrailColor). Không đổi hình dạng/kích thước.
+                    spearheadMesh.userData.isWeaponTip = true;
+                    polearmGroup.userData.tip = spearheadMesh;
                     polearmGroup.add(spearheadMesh);
 
                     return polearmGroup;
@@ -411,11 +475,27 @@
                     // buildWeaponMesh(weaponType) thay vì hard-code Sword tại đây — weaponType đến từ
                     // rosterEntry.weaponType (xem 02-collision-and-stats-core.js, initParty()).
                     // weaponType undefined (character chưa khai báo field này, VD traveler_hydro/
-                    // test_character_anemo) -> buildWeaponMesh(undefined) -> switch rơi vào default ->
+                    // nhân vật chưa khai báo weaponType) -> buildWeaponMesh(undefined) -> switch rơi vào default ->
                     // Sword y hệt trước đây. Việc GẮN vào rightHand qua weaponGrip GIỮ NGUYÊN 100%
                     // logic cũ, áp dụng đồng nhất cho MỌI loại vũ khí (Mesh đơn hay Group nhiều phần
                     // như Bow đều có position/rotation, tương thích transform này).
                     const sword = buildWeaponMesh(weaponType);
+
+                    // Readability Batch — nhận diện nguyên tố trên vũ khí (data-driven, optional): nếu
+                    // visualConfig.weaponAccentColor có khai báo, mũi vũ khí (userData.isWeaponTip) phát
+                    // sáng màu đó. Nhân vật không khai báo field này -> vũ khí giữ nguyên 100%.
+                    if (typeof visualConfig.weaponAccentColor === 'number') {
+                        sword.traverse(function (o) {
+                            if (o.isMesh && o.userData && o.userData.isWeaponTip) {
+                                o.material = new THREE.MeshStandardMaterial({
+                                    color: visualConfig.weaponAccentColor,
+                                    emissive: visualConfig.weaponAccentColor,
+                                    emissiveIntensity: 0.55, roughness: 0.35, metalness: 0.4
+                                });
+                                o.userData.baseEmissive = visualConfig.weaponAccentColor; // setWeaponEmissive(0) trả về màu này (file 08)
+                            }
+                        });
+                    }
 
                     // weapon là CON của rightHand — transform CỤC BỘ đọc từ visualConfig.weaponGrip
                     // (tương đối so với tâm rightHand), KHÔNG còn transform tuyệt đối theo playerGroup
@@ -512,6 +592,13 @@
                 createChests();
                 createTestEnemies();
                 createInteractables();
+                // Alpha M3: cột sáng bắt đầu encounter (Interactable) + HUD encounter — TRƯỚC applySaveData() để thế giới
+                // mặc định đầy đủ trước khi khôi phục save (cờ "đã nhận thưởng lần đầu" nằm trong module encounter).
+                if (window.initEncounters) window.initEncounters();
+                // Alpha M4/M6: điểm tham quan của vùng Alpha (tháp, bia đá, rương thế giới, NPC) + nhiệm vụ chính — dựng ở
+                // trạng thái mặc định TRƯỚC applySaveData() (save chỉ chỉnh lại: rương đã mở bị gỡ, tiến trình nhiệm vụ...).
+                if (window.initWorldPoi) window.initWorldPoi();
+                if (window.initStoryQuest) window.initStoryQuest();
 
                 // Infrastructure Update #1 — Save System: áp dụng dữ liệu đã lưu (nếu có) NGAY SAU KHI
                 // toàn bộ world (slime, chest, quest board...) đã được tạo xong ở trạng thái mặc định —
@@ -521,6 +608,8 @@
                 // "hành trình mới" đúng yêu cầu mục 1 spec, không cần logic New Game riêng.
                 const existingSaveData = loadGameData();
                 applySaveData(existingSaveData);
+                // Alpha M5 (Save v2): save không đọc được / của bản mới hơn -> báo cho người chơi (không im lặng ghi đè).
+                if (window.SaveSystem && window.SaveSystem.reportLoadIssue) window.SaveSystem.reportLoadIssue();
 
                 // GỠ BỎ (v0.9 — dọn dẹp code chết): trước đây có gọi window.showPlayerNamePrompt() ở
                 // đây (Pre-Alpha v0.8, popup nhập tên cũ #player-name-prompt-overlay) cho hành trình
@@ -707,7 +796,14 @@
                 [36.0, 0.0, 28.0, 15.0, 31.0, 15.0],
                 [45.0, 0.0, 35.0, 9.0, 38.0, 9.0],
                 [40.0, 0.0, 30.0, 8.0, 50.0, 8.0],
+            ];
 
+            // Alpha M1 (BUG-11): chữ khối "WELCOME TO / GENSHIN IMPACT :)" nằm NGOÀI mặt đất chơi được (z = 60,
+            // mặt đất là 100 x 100 quanh gốc toạ độ) -> chỉ còn là TRANG TRÍ: vẫn dựng mesh như cũ nhưng KHÔNG đưa
+            // vào obstacles (trước M1: 361 khối nằm trong danh sách va chạm, bị duyệt mỗi frame bởi physics người
+            // chơi, ground-check của từng slime, getGroundYForPosition...). CLIMB_WALL_CONFIGS phía trên chỉ còn
+            // khối đá/núi thật của thế giới — giữ va chạm/leo trèo như cũ.
+            const DECORATIVE_TEXT_WALL_CONFIGS = [
                 // Welcome (Hidden Update — checkpoint chữ WELCOME): thay toàn bộ khối gõ tay cũ (14
                 // khối zigzag riêng cho chữ W, các chữ còn lại chưa làm) bằng generateTextWall() — 1
                 // dòng cấu hình sinh ra cả 2 dòng chữ, đồng bộ font 5x7 cho MỌI ký tự kể cả W (không
@@ -750,6 +846,15 @@
                     mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh);
                     const aabb = new AABB(); aabb.updateFromObject(mesh, w, h, d);
                     obstacles.push({ mesh, aabb }); obstacleMeshes.push(mesh);
+                });
+
+                // Alpha M1 (BUG-11): chữ trang trí — cùng vật liệu/cách dựng như trước (hình ảnh không đổi), nhưng
+                // không có AABB, không vào obstacles/obstacleMeshes.
+                DECORATIVE_TEXT_WALL_CONFIGS.forEach(([x, y, z, w, h, d], j) => {
+                    const i = CLIMB_WALL_CONFIGS.length + j; // giữ đúng thứ tự xen kẽ 3 tông màu như khi còn chung mảng
+                    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), rockMats[i % rockMats.length]);
+                    mesh.position.set(x, y, z);
+                    mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh);
                 });
             }
 

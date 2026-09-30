@@ -94,11 +94,24 @@
                 configurable: true
             });
 
+            // Alpha M4 — điểm vào DUY NHẤT của mọi tương tác (phím F, nút chạm #interact-prompt-btn). Thêm 2 chốt chung:
+            //  - vật thể không còn dùng được (đã gỡ, bán kính 0, hoặc isAvailable() === false nếu lớp con có) -> bỏ qua;
+            //  - cùng 1 vật thể bị kích hoạt lại trong INTERACT_REPEAT_GUARD_MS (giữ F tự lặp phím, chạm + click cùng
+            //    lúc) -> bỏ qua. Vật thể KHÁC vẫn tương tác ngay được (vd nhặt liên tiếp nhiều món đồ).
+            const INTERACT_REPEAT_GUARD_MS = 300;
+            let lastInteractTarget = null, lastInteractAt = -Infinity;
             function interactWithNearbyObject() {
-                if (isGamePaused || window.isDialogueOpen || player.isDrowning || player.isDead) return;
-                if (window.nearbyInteractable) {
-                    window.nearbyInteractable.onInteract();
-                }
+                if (isGamePaused || window.isDialogueOpen || player.isDrowning || player.isDead) return false;
+                const target = window.nearbyInteractable;
+                if (!target || typeof target.onInteract !== 'function') return false;
+                if (target.pendingRemoval || !(target.interactionRadius > 0)) return false;
+                if (typeof target.isAvailable === 'function' && !target.isAvailable()) return false;
+                const now = performance.now();
+                if (target === lastInteractTarget && now - lastInteractAt < INTERACT_REPEAT_GUARD_MS) return false;
+                lastInteractTarget = target;
+                lastInteractAt = now;
+                target.onInteract();
+                return true;
             }
             window.interactWithNearbyObject = interactWithNearbyObject;
 
@@ -185,9 +198,17 @@
                     const dist = Math.random() * DROP_SCATTER_RADIUS;
                     const x = position.x + Math.cos(angle) * dist;
                     const z = position.z + Math.sin(angle) * dist;
-                    createWorldItem(x, z, drop.itemId, quantity, 0.15);
+                    const item = createWorldItem(x, z, drop.itemId, quantity, 0.15);
+                    // Alpha M0.1 — đánh dấu loot 1 lần (không hồi sinh, tự biến mất nếu bỏ qua) — xem
+                    // WorldItem.onInteract()/update() (01-entities-quest-inventory-chest.js).
+                    if (item) {
+                        item.isLootDrop = true;
+                        item.despawnTimer = LOOT_DROP_DESPAWN_SECONDS;
+                    }
                 });
             }
+            // Loot không được nhặt tự biến mất sau khoảng này (giây).
+            const LOOT_DROP_DESPAWN_SECONDS = 180;
 
             // --- GỌI KHI 1 SLIME BỊ TIÊU DIỆT (v0.6 Wilderness, cập nhật EXP ở v0.7 Core Stats) ---
             // Gọi từ Slime.takeDamage() trong enemies.js NGAY TRƯỚC/CÙNG LÚC với onEnemyKilled('slime')
@@ -409,6 +430,12 @@
                 // Xem REWARD_HANDLERS.primogem — mọi nguồn Nguyên Thạch (Quest reward, Chest...) đều
                 // cộng qua ĐÚNG 1 đường này, cùng pattern với player.exp.
                 primogem: 0,
+                // --- TÊN NGƯỜI CHƠI (Alpha M1 — BUG-01) — tên người chơi nhập ở Character Name Popup
+                // (scripts/opening.js), là dữ liệu của TÀI KHOẢN/hồ sơ, KHÔNG phải của nhân vật. TÁCH HẲN
+                // khỏi CHARACTER_DATA.name (tên nhân vật ĐANG điều khiển — switchToCharacter() ghi đè mỗi
+                // lần đổi người). Trước M1 cả 2 dùng chung CHARACTER_DATA.name nên đổi nhân vật làm mất tên
+                // người chơi và save ghi nhầm tên nhân vật. CHỈ setCharacterName() được ghi field này.
+                playerName: 'Traveler',
 
                 // --- SOFT TARGETING (Auto Aim hỗ trợ, v0.9.1) ---
                 // softTargetLockY: góc Y (radian) mục tiêu cần xoay tới, null nếu không có hỗ trợ nào đang chạy.
@@ -665,6 +692,11 @@
                 // (KHÔNG PHẢI chỉ enemyId) để 1 enemy có thể trúng NHIỀU hit khác nhau trong CÙNG 1
                 // đòn combo (multi-hit đúng nghĩa) nhưng không trúng lại đúng 1 hit đã ăn rồi.
                 polearmHasHitList: [],
+                // Character #4 (anemo_sword) — hit registration RIÊNG cho Normal Attack kiếm dạng hits[]
+                // (applySwordNormalAttackHitsTick, combat.js). TÁCH BIỆT hoàn toàn với polearmHitsTriggered/
+                // polearmHasHitList của Character #3 và hasHitList của kiếm 1-hit (Traveler).
+                swordHitsTriggered: [],
+                swordHasHitList: [],
 
                 // Character #2 (Bow) Validation — Bow Charged Attack (Aim Mode) state: TÁCH RIÊNG
                 // hoàn toàn khỏi chargeTimer/chargedWindup/... của Character #1 (Sword) — Bow Charged
@@ -731,6 +763,10 @@
                                             // đầu VÀ khi kết thúc Burst State (không carryover)
                 thunderChargeCooldownTimer: 0, // đếm ngược SAU Thunder Finisher — chặn +1 Charge MỚI
                                                 // trong lúc này (NA/CA vẫn damage/animate bình thường)
+                thunderFinisherRefreshedThisTrigger: false, // cờ nội bộ, chỉ có ý nghĩa TRONG 1 lần
+                                                             // gọi triggerThunderFinisher() — tránh
+                                                             // refresh activeElectroEffects[] nhiều
+                                                             // lần nếu Finisher trúng nhiều enemy
 
                 isDashing: false, dashTimer: 0, dashCooldownTimer: 0,
                 dashDirection: new THREE.Vector3(), lastMovementDirection: new THREE.Vector3(0, 0, 1), 
@@ -856,12 +892,14 @@
             // (lần đầu chơi, scripts/opening.js) LẪN applySaveData() (khôi phục tên đã lưu,
             // 06-camps-save-system.js) để không có 2 nơi tự ý cập nhật CHARACTER_DATA.name theo cách
             // khác nhau.
+            // Alpha M1 (BUG-01): tên nhập ở popup là TÊN NGƯỜI CHƠI -> ghi vào player.playerName (field riêng),
+            // KHÔNG còn ghi CHARACTER_DATA.name (đó là tên nhân vật đang active, do switchToCharacter() quản lý).
+            // Giữ nguyên tên hàm/cách gọi (opening.js + applySaveData() dùng) để không đổi hợp đồng công khai.
             function setCharacterName(name) {
-                const trimmed = (name || '').trim();
-                CHARACTER_DATA.name = trimmed || 'Traveler';
+                const trimmed = (typeof name === 'string' ? name : '').trim();
+                player.playerName = trimmed || 'Traveler';
                 const paimonNameEl = document.getElementById('paimon-menu-player-name');
-                if (paimonNameEl) paimonNameEl.textContent = CHARACTER_DATA.name;
-                if (window.renderCharacterScreen && window.activeWindow === 'character') window.renderCharacterScreen();
+                if (paimonNameEl) paimonNameEl.textContent = player.playerName;
             }
             window.setCharacterName = setCharacterName;
 
@@ -891,16 +929,14 @@
             // switchToCharacter() bên dưới tra cứu CHARACTER_ROSTER[characterId] để lấy dữ liệu đó,
             // HÀNH VI RUNTIME KHÔNG ĐỔI — chỉ đổi NGUỒN ĐỌC dữ liệu tĩnh.
             const PARTY_CONFIG = [
-                { characterId: 'traveler_hydro' },
-                { characterId: 'test_character_anemo' },
-                // Character #2 (Bow) Validation — slot 3 (phím "3") giờ dùng để test archer_test.
-                // Reserved slot cũ này trước đây là null — gán entry mới KHÔNG ảnh hưởng slot 1/2.
-                { characterId: 'archer_test' },
-                // Character #3 (Polearm) Validation — slot 4 (phím "4") giờ dùng để test polearm_test
-                // (test fixture, spec mục 14: "KHÔNG được coi là playable Character #3" — chỉ để kiểm
-                // tra mesh/combo/hitbox/collision/Charged Attack/Plunge). Reserved slot cũ (null) —
-                // gán entry mới KHÔNG ảnh hưởng slot 1/2/3, ĐÚNG PATTERN archer_test ở slot 3.
-                { characterId: 'polearm_test' }
+                // Cleanup: test_character_anemo (nhân vật test switch, chưa có skill/burst) ĐÃ GỠ BỎ khỏi
+                // roster và party. Party giờ khớp đúng số thứ tự nhân vật: phím 1 = Character #1,
+                // phím 2 = Character #2, phím 3 = Character #3. Save cũ lưu activeCharacterIndex theo
+                // vị trí slot cũ được quy đổi theo id nhân vật ở applySaveData() (06-camps-save-system.js).
+                { characterId: 'traveler_hydro' }, // Character #1 — phím "1"
+                { characterId: 'archer_test' },    // Character #2 (Bow) — phím "2"
+                { characterId: 'polearm_test' },   // Character #3 (Polearm/Electro) — phím "3"
+                { characterId: 'anemo_sword' }     // Character #4 (Sword/Anemo) — phím "4"
             ];
             window.PARTY_CONFIG = PARTY_CONFIG;
 
@@ -919,86 +955,96 @@
             // — giống hệt cách player.stats khởi tạo trước v0.8.5). Sau khi dựng xong, "nạp" Character
             // đầu tiên (index 0, Traveler) vào player.*/CHARACTER_DATA như bình thường — game khởi động
             // vẫn coi như đang điều khiển Traveler y hệt trước v0.8.5, không đổi hành vi mặc định.
-            function initParty() {
-                PARTY_CONFIG.forEach((config, index) => {
-                    if (!config) { partyState.push(null); return; }
+            // Party Foundation (Task 74821): dựng 1 PartyMember (runtime state + mesh riêng) cho characterId —
+            // tách nguyên văn từ initParty() để Party API (applyPartyComposition) dùng lại khi thêm nhân
+            // vật mới vào party lúc đang chơi. KHÔNG đổi giá trị khởi tạo.
+            function createPartyMember(characterId) {
 
-                    // Alpha v1.0: tra cứu dữ liệu tĩnh (name/element/region/visualConfig/baseStats)
-                    // từ CHARACTER_ROSTER qua config.characterId — GIÁ TRỊ ĐỌC RA giống hệt trước
-                    // (traveler_hydro/test_character_anemo có cùng số liệu, chỉ đổi nơi lưu).
-                    // Alpha v1.0 — Character Foundation: buildCharacterMesh() giờ nhận NGUYÊN
-                    // visualConfig (object đầy đủ) thay vì chỉ bodyColor — đọc toàn bộ cấu hình
-                    // Core/Hand/Hand/weaponGrip, xem 04-scene-init.js.
-                    //
-                    // Weapon Visual System (data-driven) — truyền THÊM rosterEntry.weaponType làm
-                    // tham số thứ 2 để buildCharacterMesh() biết dựng hình học weapon nào (xem
-                    // buildWeaponMesh() trong 04-scene-init.js). Character #1/test_character_anemo
-                    // không khai báo weaponType (undefined) — buildCharacterMesh() tự fallback về
-                    // 'sword' (xem default param ở 04-scene-init.js), nên GIÁ TRỊ ĐỌC RA/HÀNH VI
-                    // KHÔNG ĐỔI cho 2 nhân vật này, chỉ archer_test (weaponType: 'bow') nhận Bow mesh.
-                    //
-                    // Character #3 (Polearm) Validation — Weapon Schema v2: đọc rosterEntry.weapon.type
-                    // (schema MỚI — {category,type,visualProfile,attackProfile}, xem CHARACTER_ROSTER)
-                    // TRƯỚC rosterEntry.weaponType (schema CŨ, chỉ 'bow'|null) — ĐÚNG PATTERN
-                    // getActiveWeaponCategory() (combat.js) đã dùng, đảm bảo 2 nơi đọc weapon type LUÔN
-                    // NHẤT QUÁN (mesh dựng lên khớp đúng dispatch combat). Sword/Bow hiện tại CHỈ khai
-                    // báo weaponType cũ (chưa có field weapon mới) -> weaponResolvedType rơi về
-                    // rosterEntry.weaponType như cũ, HÀNH VI KHÔNG ĐỔI. Character #3 (polearm_test) khai
-                    // báo weapon.type: 'polearm' (schema mới) -> buildWeaponMesh() nhận đúng 'polearm'.
-                    const rosterEntry = CHARACTER_ROSTER[config.characterId];
-                    const weaponResolvedType = (rosterEntry.weapon && rosterEntry.weapon.type) || rosterEntry.weaponType;
-                    const meshRefs = window.buildCharacterMesh(rosterEntry.visualConfig, weaponResolvedType);
-                    partyState.push({
-                        id: rosterEntry.id,
-                        name: rosterEntry.name,
-                        element: rosterEntry.element,
-                        region: rosterEntry.region,
-                        weapon: null, artifacts: [], talents: [], constellation: 0,
-                        level: 1,
-                        exp: 0,
-                        // Stat Baseline Update v1: dùng getScaledStats(baseStats, 1) thay vì đọc
-                        // trực tiếp baseStats — ĐỒNG BỘ 1 NGUỒN CÔNG THỨC DUY NHẤT với checkLevelUp()
-                        // (không tính tay riêng ở đây). Kết quả GIỐNG HỆT baseStats gốc vì
-                        // getLevelMultiplier(1) = 1.0 chính xác (đã kiểm chứng) — KHÔNG đổi hành vi
-                        // khởi tạo nhân vật mới.
-                        stats: (function() {
-                            const s = getScaledStats(rosterEntry.baseStats, 1);
-                            return { maxHp: s.maxHp, hp: s.maxHp, atk: s.atk, def: s.def };
-                        })(),
-                        mesh: meshRefs.group,
-                        // Alpha v1.0 — Character Foundation: tiltRoot/core/leftHand/rightHand MỚI —
-                        // xem buildCharacterMesh() (04-scene-init.js) và ghi chú hierarchy ở đó.
-                        tiltRoot: meshRefs.tiltRoot,
-                        core: meshRefs.core,
-                        leftHand: meshRefs.leftHand,
-                        rightHand: meshRefs.rightHand,
-                        sword: meshRefs.sword,
-                        slashWave: meshRefs.slashWave,
-                        gliderGroup: meshRefs.gliderGroup,
-                        // Alpha v1.0 — Character System: skillCooldownTimer chuyển từ biến cục bộ
-                        // skillCooldownTimer trong combat.js sang ĐÂY, per-character, để switch nhân
-                        // vật giữa combat không làm mất/lẫn cooldown giữa các nhân vật trong Party
-                        // (quyết định đã chốt trước đó — CHƯA nối dây ở combat.js trong bước này).
-                        skillCooldownTimer: 0,
-                        // Energy System Fix v1: energy (runtime, bắt đầu = 0, TÁCH RIÊNG mỗi nhân
-                        // vật) + maxEnergy (CLONE từ rosterEntry.baseStats.maxEnergy — GIỐNG cách
-                        // stats.maxHp clone từ baseStats.maxHp phía trên, KHÔNG hard-code 50 ở đây).
-                        // player.energy/maxEnergy (file này, phía trên) giờ là getter/setter trỏ
-                        // THẲNG vào đúng field này của partyState[activeCharacterIndex] — switch nhân
-                        // vật tự động đổi đúng số, không cần đồng bộ tay ở switchToCharacter().
-                        energy: 0,
-                        maxEnergy: (typeof rosterEntry.baseStats.maxEnergy === 'number') ? rosterEntry.baseStats.maxEnergy : 50,
-                        // Core Energy + Elemental Particle System v1: energyRecharge — field RIÊNG
-                        // từng nhân vật (ĐÚNG PATTERN energy/maxEnergy ở trên), đọc bởi
-                        // resolveParticleEnergy() (12-energy-system.js) khi tính Energy nhận từ
-                        // Particle. CHƯA có artifact/weapon/stat bonus nào ghi đè giá trị này (mục 3,
-                        // 15 spec Energy System) — mặc định lấy từ ENERGY_CONFIG.defaultEnergyRecharge
-                        // (1.0) nếu chưa load kịp/thiếu, KHÔNG hard-code số 1.0 trực tiếp ở đây để chỉ
-                        // có 1 nguồn duy nhất định nghĩa default.
-                        energyRecharge: (window.ENERGY_CONFIG && typeof window.ENERGY_CONFIG.defaultEnergyRecharge === 'number')
-                            ? window.ENERGY_CONFIG.defaultEnergyRecharge
-                            : 1.0
-                    });
+                // Alpha v1.0: tra cứu dữ liệu tĩnh (name/element/region/visualConfig/baseStats)
+                // từ CHARACTER_ROSTER qua config.characterId — GIÁ TRỊ ĐỌC RA giống hệt trước
+                // (traveler_hydro có cùng số liệu, chỉ đổi nơi lưu).
+                // Alpha v1.0 — Character Foundation: buildCharacterMesh() giờ nhận NGUYÊN
+                // visualConfig (object đầy đủ) thay vì chỉ bodyColor — đọc toàn bộ cấu hình
+                // Core/Hand/Hand/weaponGrip, xem 04-scene-init.js.
+                //
+                // Weapon Visual System (data-driven) — truyền THÊM rosterEntry.weaponType làm
+                // tham số thứ 2 để buildCharacterMesh() biết dựng hình học weapon nào (xem
+                // buildWeaponMesh() trong 04-scene-init.js). Character #1
+                // không khai báo weaponType (undefined) — buildCharacterMesh() tự fallback về
+                // 'sword' (xem default param ở 04-scene-init.js), nên GIÁ TRỊ ĐỌC RA/HÀNH VI
+                // KHÔNG ĐỔI cho 2 nhân vật này, chỉ archer_test (weaponType: 'bow') nhận Bow mesh.
+                //
+                // Character #3 (Polearm) Validation — Weapon Schema v2: đọc rosterEntry.weapon.type
+                // (schema MỚI — {category,type,visualProfile,attackProfile}, xem CHARACTER_ROSTER)
+                // TRƯỚC rosterEntry.weaponType (schema CŨ, chỉ 'bow'|null) — ĐÚNG PATTERN
+                // getActiveWeaponCategory() (combat.js) đã dùng, đảm bảo 2 nơi đọc weapon type LUÔN
+                // NHẤT QUÁN (mesh dựng lên khớp đúng dispatch combat). Sword/Bow hiện tại CHỈ khai
+                // báo weaponType cũ (chưa có field weapon mới) -> weaponResolvedType rơi về
+                // rosterEntry.weaponType như cũ, HÀNH VI KHÔNG ĐỔI. Character #3 (polearm_test) khai
+                // báo weapon.type: 'polearm' (schema mới) -> buildWeaponMesh() nhận đúng 'polearm'.
+                const rosterEntry = CHARACTER_ROSTER[characterId];
+                const weaponResolvedType = (rosterEntry.weapon && rosterEntry.weapon.type) || rosterEntry.weaponType;
+                const meshRefs = window.buildCharacterMesh(rosterEntry.visualConfig, weaponResolvedType);
+                return {
+                    id: rosterEntry.id,
+                    name: rosterEntry.name,
+                    element: rosterEntry.element,
+                    region: rosterEntry.region,
+                    weapon: null, artifacts: [], talents: [], constellation: 0,
+                    level: 1,
+                    exp: 0,
+                    // Stat Baseline Update v1: dùng getScaledStats(baseStats, 1) thay vì đọc
+                    // trực tiếp baseStats — ĐỒNG BỘ 1 NGUỒN CÔNG THỨC DUY NHẤT với checkLevelUp()
+                    // (không tính tay riêng ở đây). Kết quả GIỐNG HỆT baseStats gốc vì
+                    // getLevelMultiplier(1) = 1.0 chính xác (đã kiểm chứng) — KHÔNG đổi hành vi
+                    // khởi tạo nhân vật mới.
+                    stats: (function() {
+                        const s = getScaledStats(rosterEntry.baseStats, 1);
+                        return { maxHp: s.maxHp, hp: s.maxHp, atk: s.atk, def: s.def };
+                    })(),
+                    mesh: meshRefs.group,
+                    // Alpha v1.0 — Character Foundation: tiltRoot/core/leftHand/rightHand MỚI —
+                    // xem buildCharacterMesh() (04-scene-init.js) và ghi chú hierarchy ở đó.
+                    tiltRoot: meshRefs.tiltRoot,
+                    core: meshRefs.core,
+                    leftHand: meshRefs.leftHand,
+                    rightHand: meshRefs.rightHand,
+                    sword: meshRefs.sword,
+                    slashWave: meshRefs.slashWave,
+                    gliderGroup: meshRefs.gliderGroup,
+                    // Alpha v1.0 — Character System: skillCooldownTimer chuyển từ biến cục bộ
+                    // skillCooldownTimer trong combat.js sang ĐÂY, per-character, để switch nhân
+                    // vật giữa combat không làm mất/lẫn cooldown giữa các nhân vật trong Party
+                    // (quyết định đã chốt trước đó — CHƯA nối dây ở combat.js trong bước này).
+                    skillCooldownTimer: 0,
+                    // Character #4 — Passive Tailwind: thời gian buff tốc độ còn lại (giây). Per-character
+                    // (đi theo nhân vật, không theo `player`), chỉ có hiệu lực khi nhân vật này đang ra sân.
+                    // Đếm ngược mọi thành viên 1 lần/frame ở file 08 (cùng chỗ overwatchTimer).
+                    tailwindTimer: 0,
+                    // Energy System Fix v1: energy (runtime, bắt đầu = 0, TÁCH RIÊNG mỗi nhân
+                    // vật) + maxEnergy (CLONE từ rosterEntry.baseStats.maxEnergy — GIỐNG cách
+                    // stats.maxHp clone từ baseStats.maxHp phía trên, KHÔNG hard-code 50 ở đây).
+                    // player.energy/maxEnergy (file này, phía trên) giờ là getter/setter trỏ
+                    // THẲNG vào đúng field này của partyState[activeCharacterIndex] — switch nhân
+                    // vật tự động đổi đúng số, không cần đồng bộ tay ở switchToCharacter().
+                    energy: 0,
+                    maxEnergy: (typeof rosterEntry.baseStats.maxEnergy === 'number') ? rosterEntry.baseStats.maxEnergy : 50,
+                    // Core Energy + Elemental Particle System v1: energyRecharge — field RIÊNG
+                    // từng nhân vật (ĐÚNG PATTERN energy/maxEnergy ở trên), đọc bởi
+                    // resolveParticleEnergy() (12-energy-system.js) khi tính Energy nhận từ
+                    // Particle. CHƯA có artifact/weapon/stat bonus nào ghi đè giá trị này (mục 3,
+                    // 15 spec Energy System) — mặc định lấy từ ENERGY_CONFIG.defaultEnergyRecharge
+                    // (1.0) nếu chưa load kịp/thiếu, KHÔNG hard-code số 1.0 trực tiếp ở đây để chỉ
+                    // có 1 nguồn duy nhất định nghĩa default.
+                    energyRecharge: (window.ENERGY_CONFIG && typeof window.ENERGY_CONFIG.defaultEnergyRecharge === 'number')
+                        ? window.ENERGY_CONFIG.defaultEnergyRecharge
+                        : 1.0
+                };
+            }
+
+            function initParty() {
+                PARTY_CONFIG.forEach((config) => {
+                    partyState.push(config && config.characterId ? createPartyMember(config.characterId) : null);
                 });
 
                 // Nạp Character đầu tiên (Traveler) làm active — KHÔNG qua switchToCharacter() (không có
@@ -1037,12 +1083,68 @@
             //     không phải teleport).
             //   - Cập nhật player.mesh/sword/slashWave/gliderGroup + CHARACTER_DATA + player.stats/exp/
             //     level sang bộ của Character mới.
+            // Party Foundation (Task 74821) — quy tắc chặn đổi nhân vật, 1 nơi DUY NHẤT (switch, Party API và
+            // HUD cùng đọc). Chỉ chặn những trạng thái đã xác minh là cần:
+            //   - dead: giữ nguyên quy tắc cũ.
+            //   - burst_state: Burst State của #3 là trạng thái on-field (quy tắc cũ, đã chốt).
+            //   - burst_cast: đang vung Burst dạng activation (#3 windup/active). BUG ĐÃ TÁI HIỆN: đổi người
+            //     giữa windup thì Thunder State mở ra trên nhân vật MỚI (vd Traveler) -> Burst là hành động
+            //     đã cam kết, chặn đổi cho tới khi cast xong (~0.5s).
+            //   - plunge: đòn cắm xuống đang rơi (damage tiếp đất tính theo nhân vật đang cầm).
+            // Đòn thường / Charged Attack KHÔNG bị chặn — đổi người sẽ HUỶ đòn đang dở (xem
+            // performCharacterSwap) thay vì để state machine đòn của A chạy tiếp trên B.
+            function canSwitchCharacter() {
+                if (player.isDead) return { ok: false, reason: 'dead' };
+                if (player.isBurstStateActive) return { ok: false, reason: 'burst_state' };
+                if (player.attackState === 'burstActivationWindup' || player.attackState === 'burstActivationActive') return { ok: false, reason: 'burst_cast' };
+                if (player.isPlunging) return { ok: false, reason: 'plunge' };
+                return { ok: true, reason: null };
+            }
+            window.canSwitchCharacter = canSwitchCharacter;
+
+            // Các phase đòn đánh bị HUỶ khi đổi nhân vật (animation/hit timeline thuộc về nhân vật cũ).
+            const SWITCH_CANCEL_ATTACK_STATES = ['windup', 'active', 'recovery', 'comboGrace', 'chargedWindup', 'chargedActive', 'chargedRecovery'];
+
             function switchToCharacter(index) {
                 if (index === activeCharacterIndex) return false;
                 if (!partyState[index]) return false; // Slot Reserved, chưa có Character
                 if (player.isDead) return false; // Không cho đổi lúc đang chết (đợi respawn xong)
+                if (!canSwitchCharacter().ok) return false;
+                // Character #3 Validation — Burst State là trạng thái ON-FIELD (đã chốt qua Q&A Phase
+                // 12 Integration Test): chặn switch trong lúc player.isBurstStateActive thay vì di
+                // chuyển field xuống partyState[i] (giải pháp đơn giản hơn, đủ an toàn). KHÔNG hủy
+                // Burst — chỉ TỪ CHỐI request switch (return false), Player vẫn đang ở Burst State
+                // bình thường sau lệnh gọi này. Switch khả dụng lại ngay khi Burst State tự kết thúc.
+                if (player.isBurstStateActive) return false;
 
                 const prev = partyState[activeCharacterIndex];
+                performCharacterSwap(prev, index);
+                return true;
+            }
+            window.switchToCharacter = switchToCharacter;
+
+            // Chuyển giao "cửa sổ" player từ PartyMember prev sang partyState[index] — phần thân gốc của
+            // switchToCharacter(), tách ra để Party API dùng lại khi nhân vật active bị gỡ khỏi party (prev
+            // lúc đó không còn nằm trong partyState). KHÔNG kiểm tra điều kiện — nơi gọi chịu trách nhiệm.
+            function performCharacterSwap(prev, index) {
+                // Character #4 — dọn state tạm thời gắn với nhân vật rời sân (Vortex Pull đang kéo) —
+                // xem onCharacterSwitchedOut() trong 09-character-system.js. Không ảnh hưởng nhân vật khác.
+                if (window.onCharacterSwitchedOut) window.onCharacterSwitchedOut(prev.id);
+                // Alpha M7 (KI-111 / BUG-16): đổi người khi đang NGẮM (Aim Mode: #1 giữ Skill, #2 cung Charged Attack / đặt
+                // Decoy) = HUỶ — không bắn, không đặt, không cooldown (thiết kế đã chốt ở M1). Trước đây trạng thái ngắm đi theo
+                // sang nhân vật mới và khi thả nút thì 1 mũi tên được bắn ra, tính cho nhân vật MỚI (đã tái hiện bằng chạm thật).
+                if (window.cancelAimModeInput) window.cancelAimModeInput('switch');
+                // Party Foundation: huỷ đòn thường/Charged Attack đang dở của nhân vật cũ (đã xác minh bằng
+                // probe: trước đây combo của A tiếp tục chạy trên B với timeline/hit data lẫn lộn).
+                if (SWITCH_CANCEL_ATTACK_STATES.indexOf(player.attackState) !== -1) {
+                    player.attackState = 'idle';
+                    player.attackTimer = 0;
+                    player.attackBuffered = false;
+                    player.comboIndex = 0;
+                }
+                // Đang GIỮ nút Attack (chưa tới ngưỡng CA): giữ nguyên ý định giữ nút, nhưng đếm lại từ 0 cho
+                // nhân vật mới (không thừa hưởng thời gian giữ của nhân vật cũ).
+                if (player.attackState === 'charging') player.chargeTimer = 0;
                 // player.stats là CÙNG reference với prev.stats (gán bằng con trỏ ở initParty/lần switch
                 // trước) nên hp/atk/def/maxHp đã tự động ghi thẳng vào prev.stats suốt quá trình chơi —
                 // không cần copy tay. Chỉ level/exp là number rời, cần đồng bộ lại thủ công.
@@ -1088,9 +1190,10 @@
 
                 if (window.renderCharacterScreen && window.activeWindow === 'character') window.renderCharacterScreen();
                 if (window.requestSave) window.requestSave();
-                return true;
+                // Task 3 (Combat VFX): tín hiệu đổi nhân vật ngắn gọn (chỉ hình ảnh — 09-character-system.js).
+                if (window.spawnSwitchCue) window.spawnSwitchCue(next.id);
+                if (window.onPartyChanged) window.onPartyChanged('switch');
             }
-            window.switchToCharacter = switchToCharacter;
 
             // Alpha v1.0 — Character System: trả về entry CHARACTER_ROSTER của nhân vật đang active
             // (dùng bởi executeCharacterSkill/executeCharacterBurst trong 09-character-system.js để
@@ -1103,6 +1206,199 @@
                 return CHARACTER_ROSTER[active.id];
             }
             window.getActiveCharacterData = getActiveCharacterData;
+
+            // ============================================================
+            // PARTY API (Task 74821 — Party Foundation) — điểm vào DUY NHẤT để đọc/sửa đội hình.
+            // ============================================================
+            // Nguồn sự thật: partyState (mảng PartyMember | null, đúng PARTY_CAPACITY phần tử) +
+            // activeCharacterIndex. PARTY_CONFIG chỉ còn là đội hình MẶC ĐỊNH lúc khởi tạo / fallback.
+            // Nhân vật bị gỡ khỏi party KHÔNG bị huỷ: PartyMember (level/exp/hp/energy/cooldown/mesh) được
+            // giữ trong benchedMembers theo id — thêm lại vào party thì khôi phục nguyên trạng.
+            // Chưa có hệ thống sở hữu/unlock: "available" = mọi nhân vật chơi được trong CHARACTER_ROSTER.
+            // Menu Party tương lai chỉ cần: Party.getSlots() / Party.getAvailableCharacterIds() để hiển thị,
+            // Party.validate(ids) để kiểm tra nháp, Party.commit(ids) (hoặc setSlot/swapSlots) để áp dụng,
+            // và lắng nghe window.onPartyChanged để vẽ lại. Không phụ thuộc DOM nào.
+            const PARTY_CAPACITY = 4;
+            const benchedMembers = {};
+
+            function isPlayableCharacterId(id) {
+                const r = (typeof id === 'string') ? CHARACTER_ROSTER[id] : null;
+                return !!(r && r.baseStats && r.visualConfig);
+            }
+            function getAvailableCharacterIds() {
+                return Object.keys(CHARACTER_ROSTER).filter(isPlayableCharacterId);
+            }
+            function getPartyIds() {
+                const ids = [];
+                for (let i = 0; i < PARTY_CAPACITY; i++) ids.push(partyState[i] ? partyState[i].id : null);
+                return ids;
+            }
+
+            // Chuẩn hoá + kiểm tra 1 đội hình. normalized luôn có đúng PARTY_CAPACITY phần tử: id lạ,
+            // không chơi được, trùng lặp -> null (kèm lỗi). valid = không lỗi và có >= 1 thành viên.
+            function validatePartyComposition(ids) {
+                const errors = [];
+                const normalized = [];
+                const seen = {};
+                if (!Array.isArray(ids)) {
+                    errors.push({ code: 'not_array' });
+                    ids = [];
+                }
+                if (ids.length > PARTY_CAPACITY) errors.push({ code: 'over_capacity', count: ids.length });
+                for (let i = 0; i < PARTY_CAPACITY; i++) {
+                    const id = ids[i];
+                    if (id === null || id === undefined) { normalized.push(null); continue; }
+                    if (!isPlayableCharacterId(id)) { errors.push({ code: 'unknown_character', slot: i, id: id }); normalized.push(null); continue; }
+                    if (seen[id]) { errors.push({ code: 'duplicate_character', slot: i, id: id }); normalized.push(null); continue; }
+                    seen[id] = true;
+                    normalized.push(id);
+                }
+                if (!normalized.some(Boolean)) errors.push({ code: 'empty_party' });
+                return { valid: errors.length === 0, errors: errors, normalized: normalized };
+            }
+
+            // Áp dụng đội hình mới. opts.lenient: dùng bản normalized dù có lỗi (khi load save); nếu vẫn
+            // rỗng thì rơi về PARTY_CONFIG mặc định. Mặc định (strict — cho menu) thì từ chối khi có lỗi.
+            // Trả { ok, errors, reason?, activeIndex }.
+            function applyPartyComposition(ids, opts) {
+                opts = opts || {};
+                const check = validatePartyComposition(ids);
+                let target = check.normalized;
+                if (!check.valid) {
+                    if (!opts.lenient) return { ok: false, reason: 'invalid', errors: check.errors, activeIndex: activeCharacterIndex };
+                    if (!target.some(Boolean)) {
+                        target = validatePartyComposition(PARTY_CONFIG.map(c => c ? c.characterId : null)).normalized;
+                    }
+                }
+                const current = getPartyIds();
+                if (current.join('|') === target.join('|')) return { ok: true, errors: check.errors, activeIndex: activeCharacterIndex, unchanged: true };
+
+                const prevActive = partyState[activeCharacterIndex];
+                const activeStays = !!prevActive && target.indexOf(prevActive.id) !== -1;
+                if (!activeStays && !opts.fromLoad && !canSwitchCharacter().ok) {
+                    return { ok: false, reason: 'busy', errors: check.errors, activeIndex: activeCharacterIndex };
+                }
+
+                // Đồng bộ level/exp của nhân vật active (bản sao trên player) trước khi sắp xếp lại.
+                if (prevActive) { prevActive.level = player.level; prevActive.exp = player.exp; }
+
+                const byId = {};
+                partyState.forEach(m => { if (m) byId[m.id] = m; });
+                const nextState = target.map(id => {
+                    if (!id) return null;
+                    const m = byId[id] || benchedMembers[id] || createPartyMember(id);
+                    delete benchedMembers[id];
+                    return m;
+                });
+                // Thành viên rời party -> bench (ẩn mesh, dọn effect on-field của họ).
+                Object.keys(byId).forEach(id => {
+                    if (target.indexOf(id) !== -1) return;
+                    const m = byId[id];
+                    if (m !== prevActive) {
+                        if (window.onCharacterSwitchedOut) window.onCharacterSwitchedOut(id);
+                        m.mesh.visible = false;
+                    }
+                    benchedMembers[id] = m;
+                });
+
+                partyState.length = 0;
+                nextState.forEach(m => partyState.push(m));
+
+                if (activeStays) {
+                    activeCharacterIndex = partyState.indexOf(prevActive);
+                    if (window.onPartyChanged) window.onPartyChanged('composition');
+                } else {
+                    const firstIndex = partyState.findIndex(Boolean);
+                    // activeCharacterIndex tạm trỏ vào slot sẽ vào sân; performCharacterSwap gán lại chính nó.
+                    if (prevActive) {
+                        performCharacterSwap(prevActive, firstIndex);
+                        prevActive.mesh.visible = false;
+                    } else {
+                        activeCharacterIndex = firstIndex;
+                    }
+                    if (window.onPartyChanged) window.onPartyChanged('composition'); // đội hình đổi -> HUD dựng lại
+                }
+                if (window.requestSave) window.requestSave();
+                return { ok: true, errors: check.errors, activeIndex: activeCharacterIndex };
+            }
+
+            // Gán / thay / xoá 1 slot. Nhân vật đã ở slot khác -> lỗi duplicate (menu dùng swapSlots để đổi chỗ).
+            function setPartySlot(index, characterId) {
+                if (!(index >= 0 && index < PARTY_CAPACITY)) return { ok: false, reason: 'bad_slot', errors: [], activeIndex: activeCharacterIndex };
+                const ids = getPartyIds();
+                ids[index] = characterId === undefined ? null : characterId;
+                return applyPartyComposition(ids);
+            }
+            function swapPartySlots(a, b) {
+                if (!(a >= 0 && a < PARTY_CAPACITY && b >= 0 && b < PARTY_CAPACITY)) return { ok: false, reason: 'bad_slot', errors: [], activeIndex: activeCharacterIndex };
+                const ids = getPartyIds();
+                const t = ids[a]; ids[a] = ids[b]; ids[b] = t;
+                return applyPartyComposition(ids);
+            }
+
+            // Ảnh chụp chỉ-đọc cho UI (HUD, menu tương lai). Đọc thẳng từ state thật, không cache.
+            function getPartySlots() {
+                const out = [];
+                for (let i = 0; i < PARTY_CAPACITY; i++) {
+                    const m = partyState[i];
+                    if (!m) { out.push({ index: i, characterId: null }); continue; }
+                    const isActive = i === activeCharacterIndex;
+                    out.push({
+                        index: i, characterId: m.id, name: m.name, element: m.element, isActive: isActive,
+                        level: isActive ? player.level : m.level,
+                        hp: m.stats.hp, maxHp: m.stats.maxHp,
+                        energy: m.energy, maxEnergy: m.maxEnergy,
+                        skillCooldown: m.skillCooldownTimer || 0
+                    });
+                }
+                return out;
+            }
+
+            // Task 92641 — dữ liệu roster cho màn Party (Paimon Menu). Đọc từ CHARACTER_ROSTER (định nghĩa) +
+            // partyState/bench (runtime) — KHÔNG sao chép định nghĩa nhân vật. level: nhân vật chưa từng được
+            // khởi tạo (chưa từng vào đội) hiển thị Lv.1 đúng như giá trị createPartyMember() sẽ tạo.
+            function getRosterEntries() {
+                return getAvailableCharacterIds().map(id => {
+                    const def = CHARACTER_ROSTER[id];
+                    const slot = partyState.findIndex(m => m && m.id === id);
+                    const member = slot !== -1 ? partyState[slot] : (benchedMembers[id] || null);
+                    const isActive = slot !== -1 && slot === activeCharacterIndex;
+                    return {
+                        id: id, name: def.name, element: def.element, region: def.region,
+                        weaponType: (def.weapon && def.weapon.type) || def.weaponType || 'sword',
+                        level: isActive ? player.level : (member ? member.level : 1),
+                        inParty: slot !== -1, slot: slot, isActive: isActive
+                    };
+                });
+            }
+            // Dự đoán nhân vật active SAU khi commit(ids) — CÙNG quy tắc với applyPartyComposition(): giữ nhân vật
+            // active nếu vẫn còn trong đội, nếu không thì slot có người đầu tiên. null nếu ids không hợp lệ.
+            function previewActiveCharacterId(ids) {
+                const check = validatePartyComposition(ids);
+                if (!check.valid) return null;
+                const cur = partyState[activeCharacterIndex];
+                if (cur && check.normalized.indexOf(cur.id) !== -1) return cur.id;
+                return check.normalized.find(Boolean) || null;
+            }
+
+            window.Party = {
+                CAPACITY: PARTY_CAPACITY,
+                getRosterEntries: getRosterEntries,
+                previewActiveId: previewActiveCharacterId,
+                getSlots: getPartySlots,
+                getIds: getPartyIds,
+                getActiveIndex: () => activeCharacterIndex,
+                getActiveMember: () => partyState[activeCharacterIndex] || null,
+                getAvailableCharacterIds: getAvailableCharacterIds,
+                getBenchedMember: (id) => benchedMembers[id] || null,
+                getBenchedMembers: () => Object.keys(benchedMembers).map(id => benchedMembers[id]),
+                validate: validatePartyComposition,
+                commit: applyPartyComposition,
+                setSlot: setPartySlot,
+                swapSlots: swapPartySlots,
+                switchTo: switchToCharacter,
+                canSwitch: canSwitchCharacter
+            };
 
             const COMBAT_TIMING = {
                 windup: 0.10,   

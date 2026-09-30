@@ -71,11 +71,12 @@
                 if (k === 'f') interactWithNearbyObject();
                 if (k === 'q' && !e.repeat) handleBurstKeyDown();
 
-                // --- PARTY SWITCH (Pre-Alpha v0.8.5, Bước 1 — input TẠM thời, chưa có Character HUD) ---
-                // Phím 1/2/3/4 tương ứng slot 0-3 trong partyState. Chỉ để TEST switchToCharacter() trên
-                // desktop trong lúc chưa có UI thật (Bước 3 sẽ thay bằng chạm avatar trên Character HUD
-                // và giữ luôn phím số này làm phương án desktop chính thức).
-                if (!e.repeat && ['1', '2', '3', '4'].includes(e.key) && window.switchToCharacter) {
+                // --- PARTY SWITCH (Task 74821 — phím chính thức trên PC) ---
+                // Phím 1/2/3/4 = slot 0-3 (hiện gợi ý trên Party HUD bên phải). Đi qua đúng 1 đường
+                // switchToCharacter() (kiểm tra slot rỗng/điều kiện chặn ở đó). Bỏ qua khi đang gõ vào ô
+                // nhập liệu (input/textarea/contenteditable) để không đổi nhân vật ngoài ý muốn.
+                const typingTarget = e.target && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName || ''));
+                if (!e.repeat && !typingTarget && ['1', '2', '3', '4'].includes(e.key) && window.switchToCharacter) {
                     window.switchToCharacter(parseInt(e.key, 10) - 1);
                 }
                 
@@ -129,13 +130,9 @@
 
             window.addEventListener('keyup', (e) => {
                 if (window.isOpeningActive) return;
-                if (isGamePaused || window.isDialogueOpen || player.isDrowning || player.isDead) return;
-
-                if (e.key === 'Alt') {
-                    e.preventDefault();
-                    if (altPressed) { altPressed = false; if (!isMobile && document.pointerLockElement !== container && !isGamePaused) container.requestPointerLock().catch(() => {}); }
-                    return;
-                }
+                // Alpha M7: THẢ phím di chuyển / Shift / Space luôn được ghi nhận — chỉ đặt cờ về false, không bao giờ gây
+                // ra hành động. Trước đây keyup bị bỏ qua cả lúc đang gục / đuối nước / hội thoại / pause: giữ W khi nhân
+                // vật gục, thả W trên màn hình tử vong -> hồi sinh xong nhân vật tự chạy (đã tái hiện: 9.9 m trong 1.5 s).
                 const k = e.key.toLowerCase();
                 if (k === 'w' || e.key === 'ArrowUp') keys.w = false;
                 if (k === 's' || e.key === 'ArrowDown') keys.s = false;
@@ -149,14 +146,33 @@
                 if (e.key === ' ') {
                     keys.space = false;
                 }
+                if (isGamePaused || window.isDialogueOpen || player.isDrowning || player.isDead) return;
+
+                if (e.key === 'Alt') {
+                    e.preventDefault();
+                    if (altPressed) { altPressed = false; if (!isMobile && document.pointerLockElement !== container && !isGamePaused) window.requestGamePointerLock(container); }
+                    return;
+                }
                 if (k === 'e') handleSkillKeyUp();
                 if (k === 'q') handleBurstKeyUp();
             });
 
+            // Alpha M1 (BUG-08): mất focus (Alt-Tab, click ra ngoài) HOẶC tab bị ẩn -> nhả TOÀN BỘ input đang
+            // giữ: phím di chuyển (như cũ) + joystick/ngón chạm (ui.js) + Attack/Charge/Aim/Held Skill
+            // (combat.js — huỷ, KHÔNG ra đòn). Các sự kiện thả nút sẽ không tới trong lúc đó.
+            function releaseAllHeldInput(reason) {
+                for (let k in keys) keys[k] = false;
+                altPressed = false;
+                if (window.releaseTouchInputState) window.releaseTouchInputState();
+                if (window.cancelHeldCombatInput) window.cancelHeldCombatInput(reason);
+            }
             window.addEventListener('blur', () => { 
                 if (window.isOpeningActive) return;
-                for (let k in keys) keys[k] = false; 
-                altPressed = false; 
+                releaseAllHeldInput('blur');
+            });
+            document.addEventListener('visibilitychange', () => {
+                if (window.isOpeningActive || document.visibilityState !== 'hidden') return;
+                releaseAllHeldInput('hidden');
             });
 
             window.addEventListener('mousedown', (e) => {
@@ -164,9 +180,13 @@
                 if (isGamePaused || window.isDialogueOpen || player.isDrowning || player.isDead) return;
                 if (isMobile || altPressed || e.target.closest('button') || e.target.closest('.joystick-zone') || e.target.closest('.combat-btn') || e.target.closest('#desktop-skill-btn') || e.target.closest('#game-menu')) return;
                 
-                if (document.pointerLockElement !== container) { container.requestPointerLock().catch(() => {}); return; }
+                if (document.pointerLockElement !== container) { window.requestGamePointerLock(container); return; }
                 if (document.pointerLockElement === container) {
-                    if (e.button === 0) handleAttackInput(); 
+                    // Charged Attack v1: mousedown giờ gọi handleAttackDown() thay vì
+                    // handleAttackInput() trực tiếp — handleAttackDown() tự quyết định bắt đầu charge
+                    // (nếu đang idle) hay đi thẳng qua path Normal Attack/combo-buffer cũ (nếu đang
+                    // giữa combo, giữ NGUYÊN hành vi cũ 100% cho trường hợp đó — xem combat.js).
+                    if (e.button === 0) handleAttackDown();
                     else if (e.button === 2) { 
                         keys.dash = true; 
                         triggerDash(); 
@@ -177,6 +197,12 @@
             window.addEventListener('mouseup', (e) => { 
                 if (window.isOpeningActive) return;
                 if (isGamePaused || window.isDialogueOpen || player.isDrowning || player.isDead) return;
+                // Charged Attack v1: THẢ nút Attack (button 0) -> handleAttackUp() quyết định Normal
+                // Attack (thả sớm) hay Charged Attack (đã giữ đủ chargeTime) — xem combat.js. Đây là
+                // listener mouseup ĐẦU TIÊN cho Attack (trước đây mousedown là entry point DUY NHẤT,
+                // không có xử lý mouseup nào cho Attack) — không đụng gì tới nhánh dash (button 2)
+                // ngay bên dưới.
+                if (e.button === 0) handleAttackUp();
                 if (!isMobile && !altPressed && e.button === 2) {
                     keys.dash = false; 
                     player.isSprinting = false;
@@ -210,6 +236,9 @@
                 if (!camera || !renderer) return;
                 camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
                 renderer.setSize(window.innerWidth, window.innerHeight);
+                // Alpha M1 (BUG-07): animate() không render khi pause, mà setSize() xoá trắng canvas -> vẽ lại
+                // ĐÚNG 1 frame để nền phía sau Paimon Menu không bị đen (không cần khi đang ở Title: canvas ẩn).
+                if (window.isGamePaused && !window.isOpeningActive && scene) renderer.render(scene, camera);
             });
 
             // Desktop skill/burst button wiring và joystick refs đã chuyển sang ui.js

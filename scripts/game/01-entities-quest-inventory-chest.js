@@ -150,7 +150,20 @@
                 // entry trong activeQuests (đó chỉ được tạo khi người chơi bấm Nhận, xem _acceptQuest()).
                 _instantiateQuest(def) {
                     if (!def) return null;
-                    return Object.assign({}, def, { instanceId: def.id + '_i' + (questInstanceCounter++) });
+                    // Alpha M0.1 (Loop Integrity) — BUGFIX: questInstanceCounter reset về 1 mỗi lần tải
+                    // trang, nên sau reload có thể sinh LẠI 1 instanceId đã tồn tại trong activeQuests
+                    // (entry 'turned_in' cũ) -> _findActiveEntry() trả entry cũ, slot bị kẹt vĩnh viễn ở
+                    // "Đang thực hiện". Bỏ qua mọi id đã bị chiếm (activeQuests + slot hiện tại).
+                    let instanceId;
+                    do {
+                        instanceId = def.id + '_i' + (questInstanceCounter++);
+                    } while (this._isInstanceIdTaken(instanceId));
+                    return Object.assign({}, def, { instanceId: instanceId });
+                }
+                _isInstanceIdTaken(instanceId) {
+                    if (activeQuests.some(q => q.id === instanceId)) return true;
+                    const slots = this.questSlots || {};
+                    return Object.keys(slots).some(k => slots[k] && slots[k].instanceId === instanceId);
                 }
                 // Tất cả quest instance hiện có tại board này (bỏ qua slot null) — dùng để hiển thị danh
                 // sách UI (mục 4 spec) và để tìm quest theo instanceId khi người chơi tương tác.
@@ -179,6 +192,15 @@
                         // (đề phòng title/description/rewards đã đổi ở bản cập nhật, quest instance vẫn
                         // hiển thị nội dung MỚI NHẤT thay vì đóng băng nội dung cũ).
                         this.questSlots[slotKey] = Object.assign({}, def, { instanceId: saved.instanceId });
+                        // Alpha M0.1 — sửa save ĐÃ bị kẹt bởi bug trùng instanceId: slot trỏ tới 1 entry đã
+                        // 'turned_in' -> cấp instance mới cho slot đó (cùng quy tắc với turnInQuest()).
+                        const linked = this._findActiveEntry(saved.instanceId);
+                        if (linked && linked.status === 'turned_in') {
+                            const nextDef = slotKey === 'combat'
+                                ? QUEST_DEFINITIONS_BY_SLOT['combat'][0]
+                                : pickRandomGatheringQuestDef();
+                            this.questSlots[slotKey] = this._instantiateQuest(nextDef);
+                        }
                     });
                 }
                 // Tìm entry TƯƠNG ỨNG trong activeQuests (nếu người chơi đã bấm Nhận) cho 1 quest
@@ -553,11 +575,23 @@
                     this._meshBuilder = meshBuilder;
                 }
                 onInteract() {
-                    if (this.collected) return;
+                    if (this.collected || this.pendingRemoval) return;
                     this.collected = true;
                     this.respawnTimer = WORLD_ITEM_RESPAWN_SECONDS;
 
                     playerInventory.addItem(this.itemId, this.quantity);
+
+                    // Alpha M0.1 — Loot rơi từ quái là vật phẩm DÙNG 1 LẦN: nhặt xong thì gỡ hẳn khỏi
+                    // interactables (vòng update trong animate() splice khi thấy pendingRemoval), KHÔNG
+                    // hồi sinh tại chỗ như vật phẩm mọc tự nhiên. Trước đây mỗi slime chết để lại 1 "mỏ"
+                    // slime_condensate vĩnh viễn hồi sau 60s — vừa rò rỉ (mảng interactables tăng mãi,
+                    // duyệt 2 lần/frame) vừa farm vô hạn.
+                    if (this.isLootDrop) {
+                        this._disposeMesh();
+                        this.pendingRemoval = true;
+                        this.interactionRadius = 0;
+                        return;
+                    }
 
                     // Dọn mesh khỏi scene — KHÔNG splice khỏi interactables ở đây nữa (khác bản trước):
                     // vẫn cần được update(dt) gọi mỗi frame để đếm respawnTimer. interactionRadius = 0
@@ -578,9 +612,30 @@
                 // trong lúc chờ respawn (collected=true), ngược lại không làm gì (item đang hiện diện
                 // bình thường trong world, không cần logic gì thêm mỗi frame).
                 update(dt) {
+                    if (this.pendingRemoval) return;
+                    // Alpha M0.1 — loot không nhặt sẽ tự biến mất sau LOOT_DROP_DESPAWN_SECONDS, tránh tích
+                    // tụ vô hạn quanh camp khi người chơi bỏ qua.
+                    if (this.isLootDrop) {
+                        this.despawnTimer -= dt;
+                        if (this.despawnTimer <= 0) {
+                            this._disposeMesh();
+                            this.pendingRemoval = true;
+                            this.interactionRadius = 0;
+                        }
+                        return;
+                    }
                     if (!this.collected) return;
                     this.respawnTimer -= dt;
                     if (this.respawnTimer <= 0) this._respawn();
+                }
+                _disposeMesh() {
+                    if (!this.mesh) return;
+                    scene.remove(this.mesh);
+                    this.mesh.traverse(obj => {
+                        if (obj.geometry) obj.geometry.dispose();
+                        if (obj.material) obj.material.dispose();
+                    });
+                    this.mesh = null;
                 }
                 _respawn() {
                     this.collected = false;
@@ -937,6 +992,12 @@
 
                     this._playOpenAnimation();
                     this._grantRewards();
+                    // Alpha M0.1 — BUGFIX (thưởng rương 2 lần): chuyển camp sang 'respawning' NGAY cùng lúc
+                    // phát thưởng (trước đây đợi setTimeout 0.9s). Nếu autosave (debounce 300ms từ reward
+                    // handler) ghi xuống trong khoảng hở đó rồi người chơi reload, camp được khôi phục ở
+                    // trạng thái 'cleared' -> rương mở lại được lần nữa. Giờ phần thưởng + phase mới nằm
+                    // chung 1 lần lưu. Chỉ phần dọn mesh (hình ảnh) vẫn trễ để kịp xem animation mở nắp.
+                    if (window.startCampRespawnCycle) window.startCampRespawnCycle(this.campId);
 
                     sfx.playBurst(); // Placeholder Pre-Alpha
 
@@ -948,7 +1009,6 @@
                     const disappearDelay = Math.max(CHEST_FX_CONFIG.lidOpenDuration, 0.9) * 1000;
                     setTimeout(() => {
                         this._removeFromScene();
-                        if (window.startCampRespawnCycle) window.startCampRespawnCycle(this.campId);
                     }, disappearDelay);
                 }
 

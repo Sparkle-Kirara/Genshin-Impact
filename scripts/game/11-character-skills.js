@@ -375,6 +375,160 @@ const SKILL_LIBRARY = {
         element: 'Electro',
         color: 0x9333ea // Tím Electro đậm — VFX placeholder Burst Activation
     }
+,
+
+    // --- ANEMO — VORTEX PULL (Elemental Skill của anemo_sword, Character #4) ---
+    // effectType MỚI 'vortex_pull' — vortex nhỏ trước mặt, kéo quái về 1 ĐIỂM HỘI TỤ trong khoảng thời
+    // gian giới hạn, gây damage ĐÚNG 1 LẦN tại hitTime (không gây damage theo frame dù quái đứng trong
+    // vortex). Pull là dịch chuyển vị trí có giới hạn + resolveStaticCollisions() (cùng đường va chạm
+    // knockback đang dùng) — KHÔNG dùng knockback/launch, không teleport, không vượt quá điểm hội tụ.
+    // MỌI số liệu là PLACEHOLDER.
+    anemo_vortex_pull: {
+        id: 'anemo_vortex_pull',
+        effectType: 'vortex_pull',
+        behavior: 'vortex_pull',
+        cooldown: 8.0,
+        // Tap-only: ngưỡng giữ phím rất lớn -> Skill KHÔNG BAO GIỜ vào Aim Mode (nhả phím = cast ngay,
+        // dù giữ lâu). Không cần crosshair/tickEffect như Pressure Shot.
+        holdThreshold: 999,
+        element: 'Anemo',
+        color: 0x2dd4bf,
+        vortex: {
+            forwardOffset: 2.6,   // điểm hội tụ = vị trí nhân vật + hướng nhìn x forwardOffset (m)
+            pullRadius: 5.5,      // quái trong bán kính này (tính từ điểm hội tụ) bị kéo
+            stopRadius: 0.9,      // dừng kéo khi còn cách điểm hội tụ ngần này (không chồng lên nhau/không vượt tâm)
+            pullSpeed: 6.5,       // m/s với quái nhẹ (x weightFactor theo weightClass)
+            pullDuration: 0.9,    // giây — sau đó KHÔNG còn lực kéo nào
+            hitTime: 0.55,        // giây — thời điểm damage event DUY NHẤT của Skill
+            hitRadius: 2.4,       // bán kính damage quanh điểm hội tụ tại hitTime
+            lifetime: 1.1,        // tổng thời gian tồn tại của vortex (hình ảnh), >= pullDuration/hitTime
+            // Kháng kéo RIÊNG của Skill này (không đổi WEIGHT_CLASS_CONFIG chung): quái nặng chỉ bị kéo
+            // 35% tốc độ. Đọc enemy.poise.weightClass (fallback theo enemy.isLarge).
+            weightFactor: { light: 1.0, medium: 0.6, heavy: 0.35 }
+        },
+        energyGeneration: { hitsPerParticle: 1, particles: 2, element: 'anemo' }
+    },
+
+    // --- ANEMO — EYE OF THE TEMPEST (Elemental Burst của anemo_sword, Character #4) ---
+    // effectType MỚI 'stationary_field' — vùng gió CỐ ĐỊNH tại vị trí kích hoạt (không đi theo nhân vật).
+    // Damage theo LỊCH PULSE rời rạc (pulses[i].time), mỗi pulse có định danh riêng và hit key
+    // "p<index>:<enemyId>" — 1 pulse trúng mỗi quái tối đa 1 lần; KHÔNG có vòng lặp damage theo overlap
+    // mỗi frame. Mỗi pulse kéo nhẹ quái về tâm trong pullDuration ngắn. Hết duration -> không pulse nào
+    // bắt đầu nữa, vùng tan. Kích hoạt KHÔNG gây damage (không thêm hit chỉ để cho đẹp).
+    anemo_eye_of_tempest: {
+        id: 'anemo_eye_of_tempest',
+        effectType: 'stationary_field',
+        behavior: 'wind_field',
+        energyCost: null, // điều kiện Energy ĐẦY (canUseBurst()) như mọi Burst hiện có
+        cooldown: null,
+        element: 'Anemo',
+        color: 0x2dd4bf,
+        field: {
+            radius: 6.5,
+            duration: 6.0,
+            pull: { pullSpeed: 4.5, pullDuration: 0.35, stopRadius: 1.2 },
+            weightFactor: { light: 1.0, medium: 0.6, heavy: 0.35 },
+            pulses: [
+                { time: 0.45, damageMult: 1.0, impact: { type: 'light' } },
+                { time: 1.45, damageMult: 1.0, impact: { type: 'light' } },
+                { time: 2.45, damageMult: 1.0, impact: { type: 'light' } },
+                { time: 3.45, damageMult: 1.0, impact: { type: 'light' } },
+                { time: 4.45, damageMult: 1.0, impact: { type: 'light' } },
+                { time: 5.45, damageMult: 1.6, impact: { type: 'heavy' } }
+            ]
+        }
+    },
+
+    // ===================== CHARACTER #5 — CLAYMORE (Heavy Counter Fighter) =====================
+    // --- COUNTER STANCE (Elemental Skill) — inputMode 'held': nhấn = vào thế thủ NGAY, thả = kết thúc
+    // (xem HELD SKILL CONTROLLER, 09-character-system.js). Thế thủ tối đa held.maxHold giây rồi tự kết thúc.
+    //   counter.startup: sau khi nhấn bao lâu thì bắt đầu chặn được đòn (s).
+    //   counter.perfectWindow: đòn trúng trong [startup, startup + perfectWindow] => PERFECT (rộng để dễ bấm trên mobile).
+    //   Trúng sau cửa sổ Perfect nhưng còn trong thế thủ => Counter thường.
+    //   Không có đòn nào: thả phím / hết giờ => Release Swing (đòn chém thường của Skill, không chặn gì).
+    // cooldown áp dụng cho MỌI kết quả (Counter/Perfect/Release); bị ngắt (đổi nhân vật/gục) thì KHÔNG cooldown.
+    // Số liệu PLACEHOLDER — lấy cảm hứng cơ chế phản đòn, KHÔNG sao chép số liệu gốc.
+    claymore_counter_stance: {
+        id: 'claymore_counter_stance',
+        effectType: 'held',
+        behavior: 'counter_stance',
+        inputMode: 'held',
+        cooldown: 7.5,
+        holdThreshold: 999,
+        element: null,
+        color: 0xf59e0b,
+        held: { maxHold: 1.6, moveMultiplier: 0 },
+        counter: {
+            startup: 0.08,
+            perfectWindow: 0.45,
+            postCounterInvuln: 0.45,
+            normal:  { radius: 3.2, hitstop: 0.09, shake: 0.35, energyGeneration: { particles: 3, element: null } },
+            perfect: { radius: 3.8, hitstop: 0.14, shake: 0.5,  energyGeneration: { particles: 4, element: null } }
+        },
+        release: { radius: 2.8, forwardOffset: 0.8, hitstop: 0.06, shake: 0.2, energyGeneration: { particles: 2, element: null } }
+    },
+
+    // --- EARTHSPLITTER (Elemental Burst) — giơ trọng kiếm (startup, khoá di chuyển ngắn + bất tử ngắn) rồi
+    // đập đất tại CHỖ cast: strike #1 vùng lớn impact 'launch' (quái nặng chỉ khựng theo trọng lượng), strike #2
+    // dư chấn rộng hơn, nhẹ hơn. Mỗi strike = 1 damage event/enemy.
+    claymore_earthsplitter: {
+        id: 'claymore_earthsplitter',
+        effectType: 'heavy_slam',
+        behavior: 'ground_slam',
+        energyCost: null,
+        cooldown: null,
+        element: null,
+        color: 0xf59e0b,
+        slam: {
+            startup: 0.35,
+            invuln: 0.6,
+            duration: 1.3,
+            strikes: [
+                { time: 0.35, radius: 5.0, damageMult: 1.0,  impact: { type: 'launch' }, hitstop: 0.12, shake: 0.55 },
+                { time: 0.95, radius: 6.5, damageMult: 0.55, impact: { type: 'medium' }, hitstop: 0.05, shake: 0.3 }
+            ]
+        }
+    },
+
+    // ===================== CHARACTER #6 — CATALYST (Electro Caster) =====================
+    // --- VIOLET ARC (Elemental Skill) — inputMode 'held':
+    //   Thả trước held.tapThreshold => TAP: đánh thẳng mục tiêu gần nhất trong arc.tapRange (không cần ngắm);
+    //     không có mục tiêu -> vùng nhỏ cách tapFallbackDistance m phía trước. Cooldown tapCooldown.
+    //   Giữ quá tapThreshold => HOLD: nạp dần (vòng sáng lớn dần), thả hoặc tới maxHold (tự phóng full) ->
+    //     AoE quanh người holdRadius; damage = holdMinDamageRatio..100% theo mức nạp. Cooldown holdCooldown.
+    //   Mỗi lần nhấn chỉ phóng 1 lần; đổi nhân vật/gục trong lúc nạp -> huỷ, không cooldown.
+    catalyst_violet_arc: {
+        id: 'catalyst_violet_arc',
+        effectType: 'held',
+        behavior: 'violet_arc',
+        inputMode: 'held',
+        cooldown: 10,          // = holdCooldown (fallback cho UI), cooldown thật đặt theo Tap/Hold
+        holdThreshold: 999,
+        element: 'Electro',
+        color: 0xf472b6,
+        held: { tapThreshold: 0.28, maxHold: 1.2, moveMultiplier: 0.5 },
+        arc: {
+            tapRange: 10, tapFallbackDistance: 4, tapFallbackRadius: 2.0, tapCooldown: 1.5,
+            tapEnergyGeneration: { particles: 1, element: 'electro' },
+            holdRadius: 5.0, holdMinDamageRatio: 0.7, holdCooldown: 10,
+            holdEnergyGeneration: { particles: 3, element: 'electro' },
+            holdFullEnergyGeneration: { particles: 4, element: 'electro' }
+        }
+    },
+
+    // --- LIGHTNING ROSE (Elemental Burst) — vùng CỐ ĐỊNH tại chỗ cast, tick rời rạc: tick k tại
+    // firstTick + k*tickInterval (tối đa maxTicks, trong duration). Mỗi tick đánh mỗi quái trong radius tối đa
+    // 1 lần. Tồn tại độc lập khi nhân vật rời sân (giống field #4).
+    catalyst_lightning_rose: {
+        id: 'catalyst_lightning_rose',
+        effectType: 'stationary_tick_field',
+        behavior: 'rose_field',
+        energyCost: null,
+        cooldown: null,
+        element: 'Electro',
+        color: 0xf472b6,
+        field: { radius: 5.5, duration: 10, firstTick: 0.5, tickInterval: 1.0, maxTicks: 10, tickImpact: { type: 'light' } }
+    }
 
 };
 

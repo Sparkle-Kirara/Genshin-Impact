@@ -235,7 +235,12 @@ const CHARACTER_ROSTER = {
         // thực tế: đảo dấu này cho kết quả kiếm hiện đúng bên phải màn hình như mong muốn.
         visualConfig: {
             coreColor: 0x475569,
-            handColor: 0x475569,     // Alpha v1.0: mặc định trùng coreColor cho đơn giản — tách
+            handColor: 0x475569,
+            // Task 3 (Combat VFX) — chỉ hình ảnh: vfxElement bật hiệu ứng trúng đòn theo nguyên tố
+            // (spawnHitImpact, vfx.js) cho đòn đánh của nhân vật này; attackTrailColor = vệt sáng theo
+            // mũi kiếm trong active phase của NA/CA.
+            vfxElement: 'hydro',
+            attackTrailColor: 0x67e8f9,     // Alpha v1.0: mặc định trùng coreColor cho đơn giản — tách
                                        // field riêng để nhân vật tương lai có thể có màu tay khác
                                        // core mà không cần đổi schema.
             coreRadius: 0.6,
@@ -534,213 +539,6 @@ const CHARACTER_ROSTER = {
         animationConfig: {}
     },
 
-    // --- TEST CHARACTER (ANEMO) — nhân vật thử nghiệm switch, CHƯA có skill/burst thật.
-    // skillId/burstId = null là trạng thái HỢP LỆ, không phải lỗi — dùng để test Engine xử lý
-    // đúng trường hợp "nhân vật chưa có kỹ năng" mà không crash.
-    //
-    // Character #2 Foundation & Data-Driven Validation: MỌI giá trị dưới đây (corePosition,
-    // rightHandBaseRotation, climbGripRotation, comboWindow, animation.attack) được chọn CỐ Ý
-    // KHÁC BIỆT RÕ RỆT so với traveler_hydro — không phải để đẹp, mà để bất kỳ giá trị nào của
-    // Traveler "dính" lại qua switchToCharacter() (do thiếu fallback, đọc nhầm field, hoặc hard-
-    // code sót đâu đó trong Engine) sẽ HIỆN RA NGAY LẬP TỨC khi quan sát bằng mắt, thay vì im lặng
-    // trùng khớp ngẫu nhiên. Đây CHÍNH LÀ mục đích kiểm chứng của Character #2 — không phải
-    // animation polish (xem "Bước 3" trong tài liệu thiết kế gốc).
-    test_character_anemo: {
-        id: 'test_character_anemo',
-        name: 'Test Character',
-        element: 'Anemo',
-        region: 'Mondstadt',
-        rarity: null,
-        weaponType: null,
-        gameplayType: null,
-        // maxEnergy: CỐ Ý khác Traveler (50) — số khác biệt rõ (80) để kiểm chứng
-        // switchToCharacter() đọc đúng maxEnergy riêng của nhân vật này, không dính giá trị 50 của
-        // Traveler (xem giải thích đầy đủ ở baseStats của Traveler, đầu file).
-        baseStats: { maxHp: 140, atk: 12, def: 8, maxEnergy: 80 },
-        skillId: null,
-        burstId: null,
-        // Talent System v2 Validation: multiplier CỐ Ý khác Traveler — số lớn hơn hẳn (2.0-3.5) để
-        // nếu Engine lỡ đọc nhầm talents của Traveler, sát thương sẽ CHÊNH LỆCH RÕ RỆT, dễ nhận ra
-        // khi test. Đòn #1 và #4 trong combo dùng multiplier KHÁC NHAU (2.0 vs 3.0, khác Traveler
-        // đang dùng 5 giá trị Genshin thật 0.445-0.708) — kiểm chứng Engine đọc ĐÚNG index trong
-        // mảng combo[], không phải luôn lấy phần tử đầu tiên. skill.beam scale theo "HP" thay vì
-        // "ATK" (dù skillId hiện = null, chưa thi triển được) — kiểm chứng
-        // getTalentScaling()/calculatePlayerToEnemyDamage() đọc ĐÚNG stat được khai báo, không
-        // hard-code luôn là ATK. Field tên khớp ĐÚNG cấu trúc mới (skill.beam/skill.tick, không
-        // còn skill.scaling đơn — xem Stat Baseline Update v1, roster Traveler phía trên).
-        talents: {
-            normalAttack: {
-                combo: [
-                    { scaling: { stat: 'ATK', multiplier: 2.0 } }, // Attack #1
-                    { scaling: { stat: 'ATK', multiplier: 2.5 } }, // Attack #2
-                    { scaling: { stat: 'ATK', multiplier: 2.5 } }, // Attack #3
-                    { scaling: { stat: 'ATK', multiplier: 3.0 } }  // Attack #4
-                ],
-                plunge: { scaling: { stat: 'ATK', multiplier: 3.5 } }
-            },
-            skill: {
-                level: 1,
-                beam: { scaling: { stat: 'HP', multiplier: 0.1 } },
-                tick: { scaling: { stat: 'HP', multiplier: 0.02 } }
-            },
-            burst: { level: 1, scaling: { stat: 'DEF', multiplier: 3.0 } }
-        },
-        visualConfig: {
-            coreColor: 0x16a34a,
-            handColor: 0x16a34a,
-            coreRadius: 0.6,
-            handRadius: 0.26,
-            floatingHeight: 0,
-            corePosition: { x: 0, y: 0.68, z: 0 },
-            leftHandPosition: { x: 1.2, y: 0.25, z: 0 },
-            rightHandPosition: { x: -1.2, y: 0.25, z: 0 },
-            // rightHandBaseRotation: CỐ Ý khác Traveler (0.15, -0.3, 0.1) — dùng số tròn, biên độ
-            // lớn hơn hẳn để dễ nhận ra bằng mắt nếu Engine lỡ đọc nhầm sang field của Traveler.
-            rightHandBaseRotation: { x: 0, y: 0.5, z: -0.3 },
-            weaponGrip: {
-                position: { x: 0, y: -0.3279, z: -0.0825 },
-                rotation: { x: -Math.PI / 3, y: 0, z: Math.PI / 10 }
-            },
-            // climbGripRotation: CỐ Ý khác Traveler (-π/2, 0, π/10) — kiểm chứng field optional mới
-            // hoạt động đúng khi nhân vật CÓ khai báo (khác trường hợp Traveler test giá trị mặc
-            // định, và khác trường hợp KHÔNG khai báo gì để test fallback).
-            climbGripRotation: { x: -Math.PI / 4, y: Math.PI / 2, z: 0 },
-            // comboWindow: CỐ Ý khác cả DEFAULT_COMBO_WINDOW (0.26s) lẫn Traveler (0.30s) — số nhỏ
-            // hơn hẳn (0.15s) để nếu Engine lỡ dùng nhầm giá trị của Traveler/default, combo sẽ
-            // "nối" quá dễ dàng thấy rõ (window dài hơn dự tính) khi test trên JoiPlay.
-            comboWindow: 0.15,
-            // animation.attack: ĐỦ 4 đòn (khớp scope "Attack #1 khác, #2 khác, #3 khác, #4 khác"
-            // trong tài liệu gốc) — mỗi đòn quét theo 1 TRỤC RIÊNG BIỆT, số liệu tròn, biên độ lớn
-            // (không polish, không cần "đẹp" — chỉ cần rõ ràng để phân biệt bằng mắt khi test):
-            //   Attack #1: quét theo X (trái <-> phải)
-            //   Attack #2: quét theo Y (lên <-> xuống)
-            //   Attack #3: quét theo Z (trước <-> sau)
-            //   Attack #4: quét đồng thời cả 3 trục (khác hẳn kiểu "1 trục" của #1-#3, để kiểm
-            //   chứng combo 4 đòn không bị Engine giả định cứng "chỉ có 3 kiểu quỹ đạo")
-            // Tính liên tục vẫn giữ ĐÚNG nguyên tắc đã áp dụng cho Traveler: active.*End của đòn N
-            // khớp recovery.*Start của đòn N; windup.*Offset của đòn N khớp X/Z của recovery.*Start
-            // đòn N-1 (chỉ Y được phép đổi, theo thiết kế "nối tiếp nhưng đổi độ cao" đã chốt).
-            animation: {
-                attack: [{
-                    // Attack #1 — quét NGANG theo X, windup/active/recovery đơn giản, số tròn.
-                    timing: { windup: 0.10, active: 0.15, recovery: 0.20 },
-                    sword: {
-                        windupRotation: { x: 0, y: 0, z: 0 },
-                        activeRotationEnd: { x: 0, y: 0, z: 0 }
-                    },
-                    windup: {
-                        rightHandOffset: { x: 0.3, y: 0, z: 0 },
-                        rightHandRotOffset: { x: 0, y: 0, z: 0 },
-                        coreOffset: { x: 0, y: 0, z: 0 }
-                    },
-                    active: {
-                        rightHandOffsetStart: { x: 0.3, y: 0, z: 0 },
-                        rightHandOffsetEnd: { x: -0.6, y: 0, z: 0 },
-                        rightHandRotOffsetStart: { x: 0, y: 0, z: 0 },
-                        rightHandRotOffsetEnd: { x: 0, y: 1.0, z: 0 },
-                        coreOffsetStart: { x: 0, y: 0, z: 0 },
-                        coreOffsetEnd: { x: -0.1, y: 0, z: 0 }
-                    },
-                    recovery: {
-                        rightHandOffsetStart: { x: -0.6, y: 0, z: 0 },
-                        rightHandRotOffsetStart: { x: 0, y: 1.0, z: 0 },
-                        coreOffsetStart: { x: -0.1, y: 0, z: 0 }
-                    }
-                }, {
-                    // Attack #2 — quét theo Y (lên/xuống). Windup thừa hưởng X/Z từ recovery #1
-                    // (-0.6, 0), CHỈ đổi Y (nâng lên 0.2, theo đúng nguyên tắc "nối tiếp, đổi độ cao"
-                    // đã áp dụng cho Traveler).
-                    timing: { windup: 0.10, active: 0.15, recovery: 0.20 },
-                    sword: {
-                        windupRotation: { x: 0, y: 0, z: 0 },
-                        activeRotationEnd: { x: 0, y: 0, z: 0 }
-                    },
-                    windup: {
-                        rightHandOffset: { x: -0.6, y: 0.2, z: 0 },
-                        rightHandRotOffset: { x: 0, y: 1.0, z: 0 },
-                        coreOffset: { x: -0.1, y: 0, z: 0 }
-                    },
-                    active: {
-                        rightHandOffsetStart: { x: -0.6, y: 0.2, z: 0 },
-                        rightHandOffsetEnd: { x: -0.6, y: -0.5, z: 0 },
-                        rightHandRotOffsetStart: { x: 0, y: 1.0, z: 0 },
-                        rightHandRotOffsetEnd: { x: 1.0, y: 1.0, z: 0 },
-                        coreOffsetStart: { x: -0.1, y: 0, z: 0 },
-                        coreOffsetEnd: { x: -0.1, y: -0.05, z: 0 }
-                    },
-                    recovery: {
-                        rightHandOffsetStart: { x: -0.6, y: -0.5, z: 0 },
-                        rightHandRotOffsetStart: { x: 1.0, y: 1.0, z: 0 },
-                        coreOffsetStart: { x: -0.1, y: -0.05, z: 0 }
-                    }
-                }, {
-                    // Attack #3 — quét theo Z (trước/sau). Windup thừa hưởng X/Y từ recovery #2
-                    // (-0.6, -0.5), CHỈ đổi... theo đúng nguyên tắc, lần này trục "không đổi" giữa
-                    // 2 đòn là X/Y (đòn #3 tự thân quét Z), nên windup #3 giữ NGUYÊN X/Y của
-                    // recovery #2 y hệt.
-                    timing: { windup: 0.10, active: 0.15, recovery: 0.20 },
-                    sword: {
-                        windupRotation: { x: 0, y: 0, z: 0 },
-                        activeRotationEnd: { x: 0, y: 0, z: 0 }
-                    },
-                    windup: {
-                        rightHandOffset: { x: -0.6, y: -0.5, z: 0.2 },
-                        rightHandRotOffset: { x: 1.0, y: 1.0, z: 0 },
-                        coreOffset: { x: -0.1, y: -0.05, z: 0 }
-                    },
-                    active: {
-                        rightHandOffsetStart: { x: -0.6, y: -0.5, z: 0.2 },
-                        rightHandOffsetEnd: { x: -0.6, y: -0.5, z: -0.5 },
-                        rightHandRotOffsetStart: { x: 1.0, y: 1.0, z: 0 },
-                        rightHandRotOffsetEnd: { x: 1.0, y: 0, z: 1.0 },
-                        coreOffsetStart: { x: -0.1, y: -0.05, z: 0 },
-                        coreOffsetEnd: { x: -0.1, y: -0.05, z: -0.05 }
-                    },
-                    recovery: {
-                        rightHandOffsetStart: { x: -0.6, y: -0.5, z: -0.5 },
-                        rightHandRotOffsetStart: { x: 1.0, y: 0, z: 1.0 },
-                        coreOffsetStart: { x: -0.1, y: -0.05, z: -0.05 }
-                    }
-                }, {
-                    // Attack #4 — quét ĐỒNG THỜI cả 3 trục (khác #1-#3 chỉ quét 1 trục), kiểm chứng
-                    // Engine không giả định cứng "mỗi đòn chỉ đổi 1 trục". Windup thừa hưởng nguyên
-                    // X/Y/Z từ recovery #3 (không đổi gì, khác #2/#3 vốn có đổi 1 trục Y/Z) — minh
-                    // họa rằng field "đổi độ cao ở windup" là TÙY CHỌN thiết kế, không bắt buộc.
-                    timing: { windup: 0.10, active: 0.15, recovery: 0.20 },
-                    sword: {
-                        windupRotation: { x: 0, y: 0, z: 0 },
-                        activeRotationEnd: { x: 0, y: 0, z: 0 }
-                    },
-                    windup: {
-                        rightHandOffset: { x: -0.6, y: -0.5, z: -0.5 },
-                        rightHandRotOffset: { x: 1.0, y: 0, z: 1.0 },
-                        coreOffset: { x: -0.1, y: -0.05, z: -0.05 }
-                    },
-                    active: {
-                        rightHandOffsetStart: { x: -0.6, y: -0.5, z: -0.5 },
-                        rightHandOffsetEnd: { x: 0.3, y: 0.2, z: 0.2 },
-                        rightHandRotOffsetStart: { x: 1.0, y: 0, z: 1.0 },
-                        rightHandRotOffsetEnd: { x: 0, y: 0, z: 0 },
-                        coreOffsetStart: { x: -0.1, y: -0.05, z: -0.05 },
-                        coreOffsetEnd: { x: 0, y: 0, z: 0 }
-                    },
-                    // Recovery #4 (đòn cuối trong mảng) — xoay vòng, Engine tự lerp về windup #1
-                    // (getNextAttackAnim() modulo attackList.length, xem combat.js) — recovery.Start
-                    // ở đây KHÔNG khớp X/Z với windup #1 ({x:0.3,y:0,z:0}) một cách cố ý, giống hệt
-                    // cách Traveler cũng có điểm "gãy" tại vòng lặp #4 -> #1 (đã ghi chú cần kiểm tra
-                    // bằng mắt) — Character #2 tái hiện đúng đặc điểm kiến trúc này để kiểm chứng
-                    // Engine xử lý xoay vòng nhất quán giữa các nhân vật.
-                    recovery: {
-                        rightHandOffsetStart: { x: 0.3, y: 0.2, z: 0.2 },
-                        rightHandRotOffsetStart: { x: 0, y: 0, z: 0 },
-                        coreOffsetStart: { x: 0, y: 0, z: 0 }
-                    }
-                }]
-            }
-        },
-        animationConfig: {}
-    },
-
     // ============================================================
     // CHARACTER #2 — BOW WEAPON VALIDATION (archer_test)
     // ============================================================
@@ -750,8 +548,7 @@ const CHARACTER_ROSTER = {
     // implementation (spawn arrow thay vì melee cone-hit — xem triggerAttack()/updateCombat()
     // trong combat.js/file 08, và Charged Attack Bow trong combat.js).
     //
-    // talents.normalAttack.combo: 5-shot (ĐỦ 5, khác Traveler chỉ chạy 4/5 và test_character_anemo
-    // chỉ có 4) — combo[i].arrows mô tả SỐ MŨI TÊN + timing spawn riêng của mỗi shot (field MỚI,
+    // talents.normalAttack.combo: 5-shot (ĐỦ 5, khác Traveler chỉ chạy 4/5) — combo[i].arrows mô tả SỐ MŨI TÊN + timing spawn riêng của mỗi shot (field MỚI,
     // CHỈ Engine đọc khi weaponType === 'bow' — nhân vật melee không có field này, giữ nguyên hành
     // vi cone-hit cũ). Scaling multiplier là PLACEHOLDER (chưa balance — yêu cầu đã xác nhận
     // "KHÔNG chốt balance numbers trong task này").
@@ -978,6 +775,10 @@ const CHARACTER_ROSTER = {
         visualConfig: {
             coreColor: 0xb45309,
             handColor: 0xb45309,
+            // Task 3 (Combat VFX) — chỉ hình ảnh: vfxElement bật hiệu ứng theo nguyên tố Pyro cho Skill/
+            // Burst/Decoy. Mũi tên THƯỜNG vẫn là vật lý (arrow.element = null) -> hiệu ứng trắng; chỉ
+            // mũi tên Charged mang element thật mới có hiệu ứng lửa.
+            vfxElement: 'pyro',
             coreRadius: 0.58,
             handRadius: 0.24,
             floatingHeight: 0,
@@ -1285,6 +1086,11 @@ const CHARACTER_ROSTER = {
         visualConfig: {
             coreColor: 0x7c3aed,
             handColor: 0x7c3aed,
+            // Readability Batch — chỉ hình ảnh, không ảnh hưởng gameplay: mũi giáo phát sáng tím Electro
+            // (buildCharacterMesh, file 04) + vệt sáng theo mũi giáo trong active phase của NA/CA
+            // (updateCharacterCombatVisuals, file 09). Nhân vật khác không khai báo -> không có gì đổi.
+            weaponAccentColor: 0xa855f7,
+            attackTrailColor: 0xc084fc,
             coreRadius: 0.6,
             handRadius: 0.24,
             floatingHeight: 0,
@@ -1383,7 +1189,442 @@ const CHARACTER_ROSTER = {
         animationConfig: {}
     },
 
+    // ============================================================
+    // CHARACTER #4 — ANEMO SWORD "WINDSTEP" (anemo_sword)
+    // ============================================================
+    // Mobility / Crowd Control. Vòng lặp: áp sát -> E kéo quái lại gần -> combo kiếm -> Q khống chế
+    // vùng -> di chuyển/đổi nhân vật. MỌI con số dưới đây là PLACEHOLDER (chưa balance) — gom theo đúng
+    // schema hiện có: talents.* (damage/impact/hit event), visualConfig.* (hình ảnh/animation/timing),
+    // SKILL_LIBRARY.anemo_vortex_pull / anemo_eye_of_tempest (file 11 — cơ chế Skill/Burst).
+    // State riêng của #4 (KHÔNG dùng chung với #3): player.swordHitsTriggered / player.swordHasHitList
+    // (hit registration NA/hits[] của kiếm), partyState[i].tailwindTimer (Passive).
+    anemo_sword: {
+        id: 'anemo_sword',
+        name: 'Windstep',
+        element: 'Anemo',
+        region: 'Mondstadt',
+        rarity: null,
 
+        weapon: {
+            category: 'melee',
+            type: 'sword',
+            visualProfile: 'sword_baseline',
+            attackProfile: {
+                normalAttack: 'windstep_blade',
+                chargedAttack: 'crescent_draft',
+                plunge: 'standard'
+            }
+        },
+        gameplayType: null,
+
+        // Mobility/CC — bền ngang Archer-Traveler, ATK thấp nhẹ (giá trị đến từ khống chế, không từ
+        // damage thuần). maxEnergy 60 — Burst mạnh về khống chế nên chu kỳ dài hơn một chút. PLACEHOLDER.
+        baseStats: { maxHp: 845, atk: 17, def: 52, maxEnergy: 60 },
+
+        skillId: 'anemo_vortex_pull',
+        burstId: 'anemo_eye_of_tempest',
+
+        talents: {
+            normalAttack: {
+                // combo[i].hits[] — schema multi-hit (giống polearm_test) nhưng Engine đọc qua đường KIẾM
+                // riêng (applySwordNormalAttackHitsTick, combat.js, category 'swordHits', hit list riêng).
+                // hits[].time tính từ lúc 'active' của đòn đó bắt đầu. Mỗi hit là 1 damage event có collision
+                // + hit key riêng ("enemyId:hitIndex") -> không bao giờ trúng 2 lần cùng 1 hit.
+                combo: [
+                    { hits: [{ time: 0.02, scaling: { stat: 'ATK', multiplier: 0.46 }, impact: { type: 'light' } }] },   // NA1 — chém ngang nhanh
+                    { hits: [{ time: 0.03, scaling: { stat: 'ATK', multiplier: 0.48 }, impact: { type: 'light' } }] },   // NA2 — chém ngược, xoay cổ tay
+                    { hits: [                                                                                                // NA3 — 2 nhát liên tiếp
+                        { time: 0.03, scaling: { stat: 'ATK', multiplier: 0.30 }, impact: { type: 'light' } },
+                        { time: 0.17, scaling: { stat: 'ATK', multiplier: 0.32 }, impact: { type: 'light' } }
+                    ] },
+                    { hits: [{ time: 0.06, scaling: { stat: 'ATK', multiplier: 0.56 }, impact: { type: 'light' } }] },   // NA4 — bước ngang + chém
+                    { hits: [{ time: 0.08, scaling: { stat: 'ATK', multiplier: 0.82 }, impact: { type: 'heavy' }, arcFlash: true }] } // NA5 — vòng cung kết (heavy, KHÔNG launch)
+                ],
+
+                // Crescent Draft — chém xoay + bước tới (lunge có sẵn của Charged Attack). 1 hit event,
+                // hitShape 'circle' (AoE xoay tròn, đã có sẵn trong resolveMeleeHitCollision).
+                chargedAttack: {
+                    animations: [
+                        {
+                            phase: 'windup', duration: 0.10,
+                            rightHandOffsetStart: { x: 0, y: 0, z: 0 }, rightHandOffsetEnd: { x: -0.3, y: 0.3, z: -0.2 },
+                            rightHandRotOffsetStart: { x: 0, y: 0, z: 0 }, rightHandRotOffsetEnd: { x: -0.1, y: 0.8, z: -0.3 },
+                            coreOffsetStart: { x: 0, y: 0, z: 0 }, coreOffsetEnd: { x: 0, y: 0.04, z: -0.08 }
+                        },
+                        {
+                            phase: 'active', duration: 0.26,
+                            rightHandOffsetStart: { x: -0.3, y: 0.3, z: -0.2 }, rightHandOffsetEnd: { x: 0.4, y: -0.2, z: 0.3 },
+                            rightHandRotOffsetStart: { x: -0.1, y: 0.8, z: -0.3 }, rightHandRotOffsetEnd: { x: 0.1, y: -5.5, z: 0.6 },
+                            coreOffsetStart: { x: 0, y: 0.04, z: -0.08 }, coreOffsetEnd: { x: 0, y: -0.04, z: 0.12 }
+                        },
+                        {
+                            phase: 'recovery', duration: 0.24,
+                            rightHandOffsetStart: { x: 0.4, y: -0.2, z: 0.3 }, rightHandOffsetEnd: { x: 0, y: 0, z: 0 },
+                            rightHandRotOffsetStart: { x: 0.1, y: -5.5, z: 0.6 }, rightHandRotOffsetEnd: { x: 0, y: 0, z: 0 },
+                            coreOffsetStart: { x: 0, y: -0.04, z: 0.12 }, coreOffsetEnd: { x: 0, y: 0, z: 0 }
+                        }
+                    ],
+                    hits: [
+                        { time: 0.12, scaling: { stat: 'ATK', multiplier: 1.35 }, impact: { type: 'heavy' }, hitShape: 'circle', hitRadius: 2.6, arcFlash: true }
+                    ]
+                },
+
+                plunge: { scaling: { stat: 'ATK', multiplier: 0.64 }, impact: { type: 'heavy' } },
+                lowPlunge: { scaling: { stat: 'ATK', multiplier: 1.28 }, impact: { type: 'heavy' } },
+                highPlunge: { scaling: { stat: 'ATK', multiplier: 1.60 }, impact: { type: 'heavy' } }
+            },
+
+            // Elemental Skill — Vortex Pull: 1 damage event duy nhất (SKILL_LIBRARY.anemo_vortex_pull.vortex
+            // .hitTime), đứng yên trong vortex KHÔNG gây thêm damage.
+            skill: {
+                level: 1,
+                vortex: { scaling: { stat: 'ATK', multiplier: 1.70 }, impact: { type: 'medium' } }
+            },
+
+            // Elemental Burst — mỗi PULSE là 1 damage event (scaling này x pulses[i].damageMult).
+            burst: { level: 1, scaling: { stat: 'ATK', multiplier: 0.60 } },
+
+            passive: {
+                // Tailwind — cast Skill thành công -> +tốc độ di chuyển ngắn hạn. Làm mới thời gian khi cast
+                // lại (không cộng dồn). CHỈ tốc độ di chuyển (không attack speed/damage/pull/energy).
+                tailwind: { duration: 4.0, moveSpeedMultiplier: 1.20 }
+            }
+        },
+
+        visualConfig: {
+            coreColor: 0x0f766e,
+            handColor: 0x14b8a6,
+            // Task 3 VFX opt-in: hiệu ứng trúng đòn theo nguyên tố Anemo + vệt gió theo mũi kiếm.
+            vfxElement: 'anemo',
+            attackTrailColor: 0x5eead4,
+            coreRadius: 0.58,
+            handRadius: 0.24,
+            floatingHeight: 0,
+            corePosition: { x: 0, y: 0.7, z: 0 },
+            leftHandPosition: { x: 1.15, y: 0.22, z: 0 },
+            rightHandPosition: { x: -1.3, y: 0.14, z: -0.3 },
+            rightHandBaseRotation: { x: 0.15, y: -0.3, z: 0.1 },
+            weaponGrip: {
+                position: { x: -0.1, y: -0.16, z: -0.1 },
+                rotation: { x: Math.PI / 180 * 155, y: Math.PI / 180 * -10, z: Math.PI / 180 * 150 }
+            },
+            climbGripRotation: { x: -Math.PI / 2, y: 0, z: Math.PI / 10 },
+            comboWindow: 0.30,
+            chargedAttack: {
+                chargeTime: 0.28,
+                staminaCost: 25.0 // = Traveler (cùng loại vũ khí) — KHÔNG thêm chi phí stamina mới
+            },
+            animation: {
+                // Tư thế tay/kiếm dựa trên bộ NA của Traveler (đã chứng minh hiển thị đúng với mesh kiếm),
+                // đổi timing/biên độ cho nhịp "gió" nhanh-lướt. NA4 có `displacement` (bước ngang có giới
+                // hạn, đi qua lunge + physics + va chạm hiện có — KHÔNG teleport, KHÔNG snap vào quái).
+                attack: [{
+                    // NA1 — chém ngang nhanh
+                    timing: { windup: 0.09, active: 0.12, recovery: 0.10 },
+                    sword: { windupRotation: { x: 0, y: 0, z: 0 }, activeRotationEnd: { x: 0, y: 0, z: 0 } },
+                    windup: { rightHandOffset: { x: -0.15, y: 0.3, z: 0.1 }, rightHandRotOffset: { x: -0.1, y: 0.3, z: -0.2 }, coreOffset: { x: 0, y: 0.05, z: -0.05 } },
+                    active: {
+                        rightHandOffsetStart: { x: -0.15, y: 0.3, z: 0.1 }, rightHandOffsetEnd: { x: 0.6, y: -0.35, z: 0.15 },
+                        rightHandRotOffsetStart: { x: -0.1, y: 0.3, z: -0.2 }, rightHandRotOffsetEnd: { x: 0.2, y: -2.6, z: 1.4 },
+                        coreOffsetStart: { x: 0, y: 0.05, z: -0.05 }, coreOffsetEnd: { x: -0.1, y: -0.05, z: 0.1 }
+                    },
+                    recovery: { rightHandOffsetStart: { x: 0.6, y: -0.35, z: 0.15 }, rightHandRotOffsetStart: { x: 0.2, y: -2.6, z: 1.4 }, coreOffsetStart: { x: -0.1, y: -0.05, z: 0.1 }, overshootFactor: 1.1 }
+                }, {
+                    // NA2 — chém ngược, xoay cổ tay
+                    timing: { windup: 0.07, active: 0.14, recovery: 0.11 },
+                    sword: { windupRotation: { x: 0, y: 0, z: 0 }, activeRotationEnd: { x: 0, y: 0, z: 0 } },
+                    windup: { rightHandOffset: { x: 0.55, y: -0.15, z: 0.15 }, rightHandRotOffset: { x: 0.2, y: -2.6, z: 1.4 }, coreOffset: { x: -0.1, y: -0.02, z: 0.1 } },
+                    active: {
+                        rightHandOffsetStart: { x: 0.55, y: -0.15, z: 0.15 }, rightHandOffsetEnd: { x: -0.65, y: -0.1, z: 0.1 },
+                        rightHandRotOffsetStart: { x: 0.2, y: -2.6, z: 1.4 }, rightHandRotOffsetEnd: { x: 0.3, y: -0.2, z: -1.5 },
+                        coreOffsetStart: { x: -0.1, y: -0.02, z: 0.1 }, coreOffsetEnd: { x: 0.1, y: 0, z: 0.05 }
+                    },
+                    recovery: { rightHandOffsetStart: { x: -0.65, y: -0.1, z: 0.1 }, rightHandRotOffsetStart: { x: 0.3, y: -0.2, z: -1.5 }, coreOffsetStart: { x: 0.1, y: 0, z: 0.05 }, overshootFactor: 1.1 }
+                }, {
+                    // NA3 — 2 nhát liên tiếp (active đủ dài chứa 2 hit: 0.03 và 0.17)
+                    timing: { windup: 0.08, active: 0.24, recovery: 0.14 },
+                    sword: { windupRotation: { x: 0, y: 0, z: 0 }, activeRotationEnd: { x: 0, y: 0, z: 0 } },
+                    windup: { rightHandOffset: { x: -0.65, y: -0.25, z: 0.1 }, rightHandRotOffset: { x: 0.2, y: -0.4, z: -1.2 }, coreOffset: { x: 0.1, y: -0.05, z: 0.05 } },
+                    active: {
+                        rightHandOffsetStart: { x: -0.65, y: -0.25, z: 0.1 }, rightHandOffsetEnd: { x: 0.5, y: 0.45, z: -0.15 },
+                        rightHandRotOffsetStart: { x: 0.2, y: -0.4, z: -1.2 }, rightHandRotOffsetEnd: { x: -0.2, y: 2.8, z: -1.5 },
+                        coreOffsetStart: { x: 0.1, y: -0.05, z: 0.05 }, coreOffsetEnd: { x: -0.1, y: 0.08, z: -0.08 }
+                    },
+                    recovery: { rightHandOffsetStart: { x: 0.5, y: 0.45, z: -0.15 }, rightHandRotOffsetStart: { x: -0.2, y: 2.8, z: -1.5 }, coreOffsetStart: { x: -0.1, y: 0.08, z: -0.08 }, overshootFactor: 1.1 }
+                }, {
+                    // NA4 — bước ngang ngắn rồi chém. displacement: bước sang PHẢI (lateral > 0) + chút về trước,
+                    // tổng quãng đường cố định (m), thực hiện trong suốt active phase qua lunge hiện có.
+                    timing: { windup: 0.10, active: 0.16, recovery: 0.12 },
+                    displacement: { lateral: 0.9, forward: 0.35 },
+                    sword: { windupRotation: { x: 0, y: 0, z: 0 }, activeRotationEnd: { x: 0, y: 0, z: 0 } },
+                    windup: { rightHandOffset: { x: -0.15, y: 0.35, z: 0.1 }, rightHandRotOffset: { x: -0.1, y: 0.3, z: -0.2 }, coreOffset: { x: 0.08, y: 0.03, z: -0.05 } },
+                    active: {
+                        rightHandOffsetStart: { x: -0.15, y: 0.35, z: 0.1 }, rightHandOffsetEnd: { x: 0.55, y: -0.5, z: 0.15 },
+                        rightHandRotOffsetStart: { x: -0.1, y: 0.3, z: -0.2 }, rightHandRotOffsetEnd: { x: 0.2, y: -2.6, z: 1.4 },
+                        coreOffsetStart: { x: 0.08, y: 0.03, z: -0.05 }, coreOffsetEnd: { x: -0.12, y: -0.06, z: 0.1 }
+                    },
+                    recovery: { rightHandOffsetStart: { x: 0.55, y: -0.5, z: 0.15 }, rightHandRotOffsetStart: { x: 0.2, y: -2.6, z: 1.4 }, coreOffsetStart: { x: -0.12, y: -0.06, z: 0.1 }, overshootFactor: 1.1 }
+                }, {
+                    // NA5 — vòng cung rộng kết thúc: windup dài hơn, biên độ xoay lớn nhất combo.
+                    timing: { windup: 0.16, active: 0.20, recovery: 0.22 },
+                    movementMultiplier: 0.3,
+                    sword: { windupRotation: { x: 0, y: 0, z: 0 }, activeRotationEnd: { x: 0, y: 0, z: 0 } },
+                    windup: { rightHandOffset: { x: -0.35, y: 0.45, z: -0.1 }, rightHandRotOffset: { x: -0.15, y: 0.8, z: -0.3 }, coreOffset: { x: 0.05, y: 0.06, z: -0.1 } },
+                    active: {
+                        rightHandOffsetStart: { x: -0.35, y: 0.45, z: -0.1 }, rightHandOffsetEnd: { x: 0.7, y: -0.4, z: 0.25 },
+                        rightHandRotOffsetStart: { x: -0.15, y: 0.8, z: -0.3 }, rightHandRotOffsetEnd: { x: 0.25, y: -3.2, z: 1.5 },
+                        coreOffsetStart: { x: 0.05, y: 0.06, z: -0.1 }, coreOffsetEnd: { x: -0.12, y: -0.08, z: 0.14 }
+                    },
+                    recovery: { rightHandOffsetStart: { x: 0.7, y: -0.4, z: 0.25 }, rightHandRotOffsetStart: { x: 0.25, y: -3.2, z: 1.5 }, coreOffsetStart: { x: -0.12, y: -0.08, z: 0.14 }, overshootFactor: 1.12 }
+                }]
+            }
+        },
+        animationConfig: {}
+    },
+
+    // =====================================================================================
+    // CHARACTER #5 — CLAYMORE: Heavy Counter Fighter (GI-CHAR-05-06)
+    // Cảm hứng: cơ chế phản đòn (counter) — KHÔNG dùng tên/asset/số liệu gốc. Tên & chỉ số PLACEHOLDER.
+    // Nguyên tố: CHƯA CHỐT trong thiết kế -> 'Physical' (placeholder trung tính, hạt năng lượng trung tính,
+    // VFX 'steel'). Đổi sang Electro chỉ cần sửa element + vfxElement + energyGeneration.element.
+    // NA 4 đòn chậm, mỗi đòn 1 hit nặng (impact medium/heavy, hitstop dài hơn) qua đường hits[] của lưỡi.
+    // =====================================================================================
+    claymore_counter: {
+        id: 'claymore_counter',
+        name: 'Ironwake',
+        element: 'Physical',
+        region: 'Liyue',
+        rarity: null,
+        weapon: {
+            category: 'melee',
+            type: 'claymore',
+            visualProfile: 'claymore_baseline',
+            attackProfile: { normalAttack: 'ironwake_cleave', chargedAttack: 'breaker_spin', plunge: 'standard' }
+        },
+        gameplayType: null,
+        // Bền hơn, ATK cao hơn nhóm kiếm; năng lượng Burst lớn (80). PLACEHOLDER.
+        baseStats: { maxHp: 1020, atk: 20, def: 60, maxEnergy: 80 },
+        skillId: 'claymore_counter_stance',
+        burstId: 'claymore_earthsplitter',
+        talents: {
+            normalAttack: {
+                // hits[].hitstop/shake (optional): đòn nặng khựng lâu hơn đòn kiếm (0.05 mặc định).
+                combo: [
+                    { hits: [{ time: 0.06, scaling: { stat: 'ATK', multiplier: 0.95 }, impact: { type: 'medium' }, hitstop: 0.07, shake: 0.22 }] },  // NA1 — chém xiên nặng
+                    { hits: [{ time: 0.06, scaling: { stat: 'ATK', multiplier: 0.90 }, impact: { type: 'medium' }, hitstop: 0.07, shake: 0.22 }] },  // NA2 — chém ngược
+                    { hits: [{ time: 0.08, scaling: { stat: 'ATK', multiplier: 1.10 }, impact: { type: 'heavy' },  hitstop: 0.09, shake: 0.3 }] },   // NA3 — bổ chéo
+                    { hits: [{ time: 0.10, scaling: { stat: 'ATK', multiplier: 1.45 }, impact: { type: 'heavy' },  hitstop: 0.12, shake: 0.42, hitShape: 'circle', hitRadius: 3.0, arcFlash: true }] } // NA4 — quét vòng kết
+                ],
+                // Breaker Spin — xoay trọng kiếm 2 nhịp: nhịp 1 medium, nhịp 2 heavy (AoE tròn quanh người).
+                chargedAttack: {
+                    animations: [
+                        { phase: 'windup', duration: 0.30,
+                          rightHandOffsetStart: { x: 0, y: 0, z: 0 }, rightHandOffsetEnd: { x: -0.4, y: 0.45, z: -0.3 },
+                          rightHandRotOffsetStart: { x: 0, y: 0, z: 0 }, rightHandRotOffsetEnd: { x: -0.2, y: 1.0, z: -0.4 },
+                          coreOffsetStart: { x: 0, y: 0, z: 0 }, coreOffsetEnd: { x: 0, y: -0.06, z: -0.1 } },
+                        { phase: 'active', duration: 0.34,
+                          rightHandOffsetStart: { x: -0.4, y: 0.45, z: -0.3 }, rightHandOffsetEnd: { x: 0.5, y: -0.25, z: 0.35 },
+                          rightHandRotOffsetStart: { x: -0.2, y: 1.0, z: -0.4 }, rightHandRotOffsetEnd: { x: 0.1, y: -6.0, z: 0.6 },
+                          coreOffsetStart: { x: 0, y: -0.06, z: -0.1 }, coreOffsetEnd: { x: 0, y: -0.08, z: 0.14 } },
+                        { phase: 'recovery', duration: 0.36,
+                          rightHandOffsetStart: { x: 0.5, y: -0.25, z: 0.35 }, rightHandOffsetEnd: { x: 0, y: 0, z: 0 },
+                          rightHandRotOffsetStart: { x: 0.1, y: -6.0, z: 0.6 }, rightHandRotOffsetEnd: { x: 0, y: 0, z: 0 },
+                          coreOffsetStart: { x: 0, y: -0.08, z: 0.14 }, coreOffsetEnd: { x: 0, y: 0, z: 0 } }
+                    ],
+                    hits: [
+                        { time: 0.06, scaling: { stat: 'ATK', multiplier: 0.90 }, impact: { type: 'medium' }, hitShape: 'circle', hitRadius: 3.0, hitstop: 0.07, shake: 0.25 },
+                        { time: 0.24, scaling: { stat: 'ATK', multiplier: 1.30 }, impact: { type: 'heavy' },  hitShape: 'circle', hitRadius: 3.2, hitstop: 0.11, shake: 0.4, arcFlash: true }
+                    ]
+                },
+                plunge: { scaling: { stat: 'ATK', multiplier: 0.90 }, impact: { type: 'heavy' } },
+                lowPlunge: { scaling: { stat: 'ATK', multiplier: 1.60 }, impact: { type: 'heavy' } },
+                highPlunge: { scaling: { stat: 'ATK', multiplier: 2.00 }, impact: { type: 'launch' } }
+            },
+            // Counter Stance (SKILL_LIBRARY.claymore_counter_stance). Đọc qua category 'talent:skill.<key>'.
+            skill: {
+                level: 1,
+                counterNormal:  { scaling: { stat: 'ATK', multiplier: 2.4 }, impact: { type: 'heavy' } },
+                counterPerfect: { scaling: { stat: 'ATK', multiplier: 3.6 }, impact: { type: 'launch' } },
+                release:        { scaling: { stat: 'ATK', multiplier: 1.3 }, impact: { type: 'medium' } }
+            },
+            // Earthsplitter — mỗi strike = scaling này x strikes[i].damageMult.
+            burst: { level: 1, scaling: { stat: 'ATK', multiplier: 3.2 } }
+        },
+        visualConfig: {
+            coreColor: 0x57534e,
+            handColor: 0xd97706,
+            vfxElement: 'steel',
+            attackTrailColor: 0xfcd34d,
+            coreRadius: 0.62,
+            handRadius: 0.26,
+            floatingHeight: 0,
+            corePosition: { x: 0, y: 0.72, z: 0 },
+            leftHandPosition: { x: 1.15, y: 0.22, z: 0 },
+            rightHandPosition: { x: -1.3, y: 0.14, z: -0.3 },
+            rightHandBaseRotation: { x: 0.15, y: -0.3, z: 0.1 },
+            weaponGrip: {
+                position: { x: -0.1, y: -0.16, z: -0.1 },
+                rotation: { x: Math.PI / 180 * 155, y: Math.PI / 180 * -10, z: Math.PI / 180 * 150 }
+            },
+            climbGripRotation: { x: -Math.PI / 2, y: 0, z: Math.PI / 10 },
+            // comboWindow tính TỪ ĐẦU recovery -> phải > recovery dài nhất (0.46) để còn khoảng 'comboGrace' nối đòn.
+            comboWindow: 0.75,
+            chargedAttack: { chargeTime: 0.35, staminaCost: 40.0 },
+            animation: {
+                // Nhịp CHẬM & NẶNG: windup dài (lấy đà rõ), active ngắn (cú vung dứt khoát), recovery dài hơn kiếm.
+                attack: [{
+                    timing: { windup: 0.24, active: 0.16, recovery: 0.34 },
+                    movementMultiplier: 0.25,
+                    claymore: { windupRotation: { x: 0, y: 0, z: 0 }, activeRotationEnd: { x: 0, y: 0, z: 0 } },
+                    windup: { rightHandOffset: { x: -0.25, y: 0.45, z: -0.05 }, rightHandRotOffset: { x: -0.15, y: 0.45, z: -0.3 }, coreOffset: { x: 0.04, y: 0.02, z: -0.1 } },
+                    active: {
+                        rightHandOffsetStart: { x: -0.25, y: 0.45, z: -0.05 }, rightHandOffsetEnd: { x: 0.7, y: -0.45, z: 0.2 },
+                        rightHandRotOffsetStart: { x: -0.15, y: 0.45, z: -0.3 }, rightHandRotOffsetEnd: { x: 0.25, y: -2.8, z: 1.5 },
+                        coreOffsetStart: { x: 0.04, y: 0.02, z: -0.1 }, coreOffsetEnd: { x: -0.12, y: -0.08, z: 0.14 }
+                    },
+                    recovery: { rightHandOffsetStart: { x: 0.7, y: -0.45, z: 0.2 }, rightHandRotOffsetStart: { x: 0.25, y: -2.8, z: 1.5 }, coreOffsetStart: { x: -0.12, y: -0.08, z: 0.14 }, overshootFactor: 1.05 }
+                }, {
+                    timing: { windup: 0.22, active: 0.16, recovery: 0.32 },
+                    movementMultiplier: 0.25,
+                    claymore: { windupRotation: { x: 0, y: 0, z: 0 }, activeRotationEnd: { x: 0, y: 0, z: 0 } },
+                    windup: { rightHandOffset: { x: 0.65, y: -0.2, z: 0.15 }, rightHandRotOffset: { x: 0.25, y: -2.8, z: 1.5 }, coreOffset: { x: -0.1, y: -0.04, z: 0.1 } },
+                    active: {
+                        rightHandOffsetStart: { x: 0.65, y: -0.2, z: 0.15 }, rightHandOffsetEnd: { x: -0.75, y: -0.15, z: 0.1 },
+                        rightHandRotOffsetStart: { x: 0.25, y: -2.8, z: 1.5 }, rightHandRotOffsetEnd: { x: 0.3, y: -0.2, z: -1.6 },
+                        coreOffsetStart: { x: -0.1, y: -0.04, z: 0.1 }, coreOffsetEnd: { x: 0.12, y: -0.02, z: 0.06 }
+                    },
+                    recovery: { rightHandOffsetStart: { x: -0.75, y: -0.15, z: 0.1 }, rightHandRotOffsetStart: { x: 0.3, y: -0.2, z: -1.6 }, coreOffsetStart: { x: 0.12, y: -0.02, z: 0.06 }, overshootFactor: 1.05 }
+                }, {
+                    timing: { windup: 0.26, active: 0.18, recovery: 0.36 },
+                    movementMultiplier: 0.2,
+                    claymore: { windupRotation: { x: 0, y: 0, z: 0 }, activeRotationEnd: { x: 0, y: 0, z: 0 } },
+                    windup: { rightHandOffset: { x: -0.4, y: 0.6, z: -0.2 }, rightHandRotOffset: { x: -0.3, y: 0.3, z: -1.0 }, coreOffset: { x: 0.08, y: 0.06, z: -0.12 } },
+                    active: {
+                        rightHandOffsetStart: { x: -0.4, y: 0.6, z: -0.2 }, rightHandOffsetEnd: { x: 0.45, y: -0.5, z: 0.3 },
+                        rightHandRotOffsetStart: { x: -0.3, y: 0.3, z: -1.0 }, rightHandRotOffsetEnd: { x: 0.35, y: -2.2, z: 1.2 },
+                        coreOffsetStart: { x: 0.08, y: 0.06, z: -0.12 }, coreOffsetEnd: { x: -0.1, y: -0.1, z: 0.16 }
+                    },
+                    recovery: { rightHandOffsetStart: { x: 0.45, y: -0.5, z: 0.3 }, rightHandRotOffsetStart: { x: 0.35, y: -2.2, z: 1.2 }, coreOffsetStart: { x: -0.1, y: -0.1, z: 0.16 }, overshootFactor: 1.05 }
+                }, {
+                    // NA4 — quét vòng kết: windup dài nhất combo, đứng gần như tại chỗ.
+                    timing: { windup: 0.34, active: 0.22, recovery: 0.46 },
+                    movementMultiplier: 0.15,
+                    claymore: { windupRotation: { x: 0, y: 0, z: 0 }, activeRotationEnd: { x: 0, y: 0, z: 0 } },
+                    windup: { rightHandOffset: { x: -0.45, y: 0.5, z: -0.2 }, rightHandRotOffset: { x: -0.2, y: 1.0, z: -0.4 }, coreOffset: { x: 0.06, y: 0.04, z: -0.14 } },
+                    active: {
+                        rightHandOffsetStart: { x: -0.45, y: 0.5, z: -0.2 }, rightHandOffsetEnd: { x: 0.75, y: -0.45, z: 0.3 },
+                        rightHandRotOffsetStart: { x: -0.2, y: 1.0, z: -0.4 }, rightHandRotOffsetEnd: { x: 0.3, y: -3.6, z: 1.6 },
+                        coreOffsetStart: { x: 0.06, y: 0.04, z: -0.14 }, coreOffsetEnd: { x: -0.14, y: -0.1, z: 0.18 }
+                    },
+                    recovery: { rightHandOffsetStart: { x: 0.75, y: -0.45, z: 0.3 }, rightHandRotOffsetStart: { x: 0.3, y: -3.6, z: 1.6 }, coreOffsetStart: { x: -0.14, y: -0.1, z: 0.18 }, overshootFactor: 1.05 }
+                }]
+            }
+        },
+        animationConfig: {}
+    },
+
+    // =====================================================================================
+    // CHARACTER #6 — CATALYST: Electro Caster (GI-CHAR-05-06)
+    // Cảm hứng: pháp sư Electro dễ chơi — KHÔNG dùng tên/asset/số liệu gốc. Tên & chỉ số PLACEHOLDER.
+    // NA = orb điện bay thẳng tới mục tiêu gần nhất (TargetAssist 3D của Bow, không homing), không trọng lực,
+    // tầm ~15m (speed x maxLifeTime), trúng tường thì tan. CA = vận rồi nổ AoE TẠI mục tiêu (tốn stamina).
+    // VFX 'rose' (hồng-tím) tách biệt tia tím của #3.
+    // =====================================================================================
+    catalyst_electro: {
+        id: 'catalyst_electro',
+        name: 'Veyla',
+        element: 'Electro',
+        region: 'Mondstadt',
+        rarity: null,
+        weapon: {
+            category: 'ranged',
+            type: 'catalyst',
+            visualProfile: 'catalyst_baseline',
+            attackProfile: { normalAttack: 'rose_bolt', chargedAttack: 'bloom_burst', plunge: 'standard' }
+        },
+        gameplayType: null,
+        baseStats: { maxHp: 790, atk: 19, def: 48, maxEnergy: 80 },
+        skillId: 'catalyst_violet_arc',
+        burstId: 'catalyst_lightning_rose',
+        talents: {
+            normalAttack: {
+                // arrows[] = projectile (dùng CHUNG applyBowArrowSpawnTick/spawnArrow). Thông số orb khai báo tại đây.
+                combo: [
+                    { arrows: [{ spawnTime: 0.03, scaling: { stat: 'ATK', multiplier: 0.44 }, impact: { type: 'light' }, speed: 22, gravity: 0, drag: 0, maxLifeTime: 0.7, stuckLifeTime: 0, visual: 'orb', color: 0xf9a8d4, element: 'rose', hitboxSize: 0.55, sweep: true }] },
+                    { arrows: [{ spawnTime: 0.03, scaling: { stat: 'ATK', multiplier: 0.40 }, impact: { type: 'light' }, speed: 22, gravity: 0, drag: 0, maxLifeTime: 0.7, stuckLifeTime: 0, visual: 'orb', color: 0xf9a8d4, element: 'rose', hitboxSize: 0.55, sweep: true }] },
+                    { arrows: [{ spawnTime: 0.03, scaling: { stat: 'ATK', multiplier: 0.50 }, impact: { type: 'light' }, speed: 22, gravity: 0, drag: 0, maxLifeTime: 0.7, stuckLifeTime: 0, visual: 'orb', color: 0xf9a8d4, element: 'rose', hitboxSize: 0.55, sweep: true }] },
+                    { arrows: [{ spawnTime: 0.05, scaling: { stat: 'ATK', multiplier: 0.64 }, impact: { type: 'medium' }, speed: 24, gravity: 0, drag: 0, maxLifeTime: 0.7, stuckLifeTime: 0, visual: 'orb', color: 0xfbcfe8, element: 'rose', hitboxSize: 0.65, sweep: true }] }
+                ],
+                // Bloom Burst — vận (windup) rồi nổ AoE tại mục tiêu gần nhất trong 12m (không có -> 6m phía trước).
+                chargedAttack: {
+                    animations: [
+                        { phase: 'windup', duration: 0.40,
+                          rightHandOffsetStart: { x: 0, y: 0, z: 0 }, rightHandOffsetEnd: { x: 0.2, y: 0.6, z: 0.3 },
+                          rightHandRotOffsetStart: { x: 0, y: 0, z: 0 }, rightHandRotOffsetEnd: { x: -0.4, y: 0, z: 0 },
+                          coreOffsetStart: { x: 0, y: 0, z: 0 }, coreOffsetEnd: { x: 0, y: 0.06, z: -0.06 } },
+                        { phase: 'active', duration: 0.18,
+                          rightHandOffsetStart: { x: 0.2, y: 0.6, z: 0.3 }, rightHandOffsetEnd: { x: 0.3, y: 0.2, z: 0.8 },
+                          rightHandRotOffsetStart: { x: -0.4, y: 0, z: 0 }, rightHandRotOffsetEnd: { x: 0.3, y: 0, z: 0 },
+                          coreOffsetStart: { x: 0, y: 0.06, z: -0.06 }, coreOffsetEnd: { x: 0, y: 0, z: 0.08 } },
+                        { phase: 'recovery', duration: 0.30,
+                          rightHandOffsetStart: { x: 0.3, y: 0.2, z: 0.8 }, rightHandOffsetEnd: { x: 0, y: 0, z: 0 },
+                          rightHandRotOffsetStart: { x: 0.3, y: 0, z: 0 }, rightHandRotOffsetEnd: { x: 0, y: 0, z: 0 },
+                          coreOffsetStart: { x: 0, y: 0, z: 0.08 }, coreOffsetEnd: { x: 0, y: 0, z: 0 } }
+                    ],
+                    hits: [
+                        { time: 0.05, center: 'target', targetRange: 12, fallbackDistance: 6, hitShape: 'circle', hitRadius: 2.6,
+                          scaling: { stat: 'ATK', multiplier: 1.25 }, impact: { type: 'medium' } }
+                    ]
+                },
+                plunge: { scaling: { stat: 'ATK', multiplier: 0.57 }, impact: { type: 'medium' } },
+                lowPlunge: { scaling: { stat: 'ATK', multiplier: 1.14 }, impact: { type: 'medium' } },
+                highPlunge: { scaling: { stat: 'ATK', multiplier: 1.42 }, impact: { type: 'heavy' } }
+            },
+            skill: {
+                level: 1,
+                arcTap:  { scaling: { stat: 'ATK', multiplier: 0.90 }, impact: { type: 'light' } },
+                arcHold: { scaling: { stat: 'ATK', multiplier: 2.20 }, impact: { type: 'medium' } }
+            },
+            // Lightning Rose — mỗi TICK = 1 damage event/enemy với scaling này.
+            burst: { level: 1, scaling: { stat: 'ATK', multiplier: 0.36 } }
+        },
+        visualConfig: {
+            coreColor: 0x9d174d,
+            handColor: 0xf9a8d4,
+            vfxElement: 'rose',
+            attackTrailColor: 0xf9a8d4,
+            coreRadius: 0.56,
+            handRadius: 0.22,
+            floatingHeight: 0,
+            corePosition: { x: 0, y: 0.7, z: 0 },
+            leftHandPosition: { x: 1.1, y: 0.22, z: 0 },
+            rightHandPosition: { x: -1.15, y: 0.25, z: 0.1 },
+            rightHandBaseRotation: { x: 0, y: 0, z: 0 },
+            weaponGrip: {
+                position: { x: 0, y: 0.12, z: 0.1 },
+                rotation: { x: 0, y: 0, z: 0 }
+            },
+            climbGripRotation: { x: 0, y: 0, z: 0 },
+            comboWindow: 0.32,
+            chargedAttack: { chargeTime: 0.30, staminaCost: 50.0 },
+            animation: {
+                // Tư thế niệm phép: kéo tay về sau/lên (windup) rồi đẩy thẳng ra trước (active) — lúc phóng orb.
+                attack: [0, 1, 2, 3].map(i => ({
+                    timing: i === 3 ? { windup: 0.16, active: 0.14, recovery: 0.24 } : { windup: 0.11, active: 0.12, recovery: 0.16 },
+                    movementMultiplier: 0.45,
+                    catalyst: { windupRotation: { x: 0, y: 0, z: 0 }, activeRotationEnd: { x: 0, y: 0, z: 0 } },
+                    windup: { rightHandOffset: { x: 0.15, y: 0.25, z: -0.25 }, rightHandRotOffset: { x: -0.2, y: 0, z: 0 }, coreOffset: { x: 0, y: 0.03, z: -0.05 } },
+                    active: {
+                        rightHandOffsetStart: { x: 0.15, y: 0.25, z: -0.25 }, rightHandOffsetEnd: { x: 0.35, y: 0.15, z: 0.7 },
+                        rightHandRotOffsetStart: { x: -0.2, y: 0, z: 0 }, rightHandRotOffsetEnd: { x: 0.2, y: 0, z: 0 },
+                        coreOffsetStart: { x: 0, y: 0.03, z: -0.05 }, coreOffsetEnd: { x: 0, y: 0, z: 0.06 }
+                    },
+                    recovery: { rightHandOffsetStart: { x: 0.35, y: 0.15, z: 0.7 }, rightHandRotOffsetStart: { x: 0.2, y: 0, z: 0 }, coreOffsetStart: { x: 0, y: 0, z: 0.06 }, overshootFactor: 1.0 }
+                }))
+            }
+        },
+        animationConfig: {}
+    },
 };
 
 window.CHARACTER_ROSTER = CHARACTER_ROSTER;

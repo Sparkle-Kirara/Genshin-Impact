@@ -54,7 +54,7 @@ function executeCharacterSkill(character, dir) {
     if (!character) return; // an toàn: chưa có nhân vật active hợp lệ
 
     const skillData = SKILL_LIBRARY[character.skillId];
-    if (!skillData) return; // nhân vật chưa có skill (VD test_character_anemo) — no-op, KHÔNG lỗi
+    if (!skillData) return; // nhân vật chưa có skill (skillId: null) — no-op, KHÔNG lỗi
 
     if (skillData.effectType === 'beam') {
         runBeamEffect('skill', character, skillData, dir);
@@ -67,6 +67,8 @@ function executeCharacterSkill(character, dir) {
         // cũ nào, đúng nguyên tắc chung của project: skill mới KHÔNG BAO GIỜ tự hủy instance cũ chỉ
         // vì cast lại, đã áp dụng nhất quán từ Decoy Bugfix).
         deployElectroReactiveEffect(character);
+    } else if (skillData.effectType === 'vortex_pull') {
+        runVortexPullEffect('skill', character, skillData, dir); // Character #4
     } else {
         // Alpha v1.0 chỉ hỗ trợ 'beam'/'projectile'. Nếu tới đây nghĩa là SKILL_LIBRARY có
         // effectType sai chính tả hoặc chưa được Engine hỗ trợ — cảnh báo rõ ràng thay vì
@@ -100,6 +102,12 @@ function executeCharacterBurst(character, dir) {
         // nhận qua Integration Test Phase 12). Hàm này CHỈ khởi động state machine — damage thật xảy
         // ra trong updateCombat() (file 08) khi burstActivationActive kết thúc (xem đó).
         startBurstActivation(character, burstData, dir);
+    } else if (burstData.effectType === 'stationary_field') {
+        runWindFieldEffect('burst', character, burstData, dir); // Character #4
+    } else if (burstData.effectType === 'heavy_slam') {
+        runGroundSlamEffect('burst', character, burstData); // Character #5
+    } else if (burstData.effectType === 'stationary_tick_field') {
+        runRoseFieldEffect('burst', character, burstData); // Character #6
     } else {
         console.warn(`[CharacterSystem] Burst "${character.burstId}" có effectType không hợp lệ: "${burstData.effectType}"`);
     }
@@ -158,6 +166,8 @@ function runBeamEffect(slot, character, skillData, dir) {
         enemy.takeDamage(beamFinalDamage, forward, true, withDamageSource(null, character));
         const hitPos = origin.clone().addScaledVector(forward, t);
         spawnHydroSplash(hitPos, forward, true); // GIỮ NGUYÊN — hard-code Hydro trong tên hàm
+        // Task 3 (Combat VFX): gợn nước + giọt bắn tại ĐÚNG điểm tia nước cắt qua enemy (hit thật).
+        if (window.spawnHitImpact && getCharacterVfxElement(character)) window.spawnHitImpact(hitPos, forward, { element: getCharacterVfxElement(character), weight: 'light' });
                                                    // visual, ghi chú nợ kỹ thuật tương tự sfx,
                                                    // không xử lý trong migration này
         triggerHydroFlash();
@@ -193,6 +203,14 @@ function runBeamEffect(slot, character, skillData, dir) {
     // --- Hiệu ứng hình ảnh — GIỮ NGUYÊN activeHydroBeamVisuals (KHÔNG gộp vào activeEffects,
     // đã chốt riêng với người dùng: giữ tách biệt, ít thay đổi hơn cho bước migration này) ---
     spawnBeamVisual(origin, forward, beamEndDistance, skillData);
+    // Task 3 (Combat VFX): KHOẢNH KHẮC PHÓNG (dù trúng hay trượt) — chớp nước ở miệng tia + gợn dưới
+    // chân nhân vật. Hiệu ứng trúng đòn chỉ xuất hiện ở nhánh hitEnemies phía trên.
+    const castVfx = getCharacterVfxElement(character);
+    if (castVfx && window.spawnMuzzlePuff) {
+        const prof = window.getElementVfx(castVfx);
+        window.spawnMuzzlePuff(origin, forward, prof.light);
+        window.spawnGroundRing(window.groundPointUnder(player.position), 1.3, prof.main, { life: 0.35, startRatio: 0.4, opacity: 0.6 });
+    }
 
     // --- Recoil — GIỮ NGUYÊN cơ chế displacement-over-time (cộng vào velocity mỗi frame
     // trong updatePhysics, không cộng 1 lần ở đây, vì hàm này chạy sau updatePhysics) ---
@@ -271,6 +289,7 @@ function runProjectileEffect(slot, character, skillData, dir) {
 // không có skillData vì không xuất phát từ SKILL_LIBRARY — xuất phát từ talents.normalAttack.combo
 // hoặc talents.bowChargedAttack, xem spawnArrow()).
 function updateActiveEffects(dt) {
+    updateCharacterKitTimers(dt); // Character #5/#6 — held skill + castLock (định nghĩa cuối file)
     for (const slot of ['skill', 'burst']) {
         const list = player.activeEffects[slot];
         for (let i = list.length - 1; i >= 0; i--) {
@@ -283,6 +302,14 @@ function updateActiveEffects(dt) {
                 // Elemental Burst Validation — dispatch Pyro Burst Zone (archer_pyro_burst), ĐÚNG
                 // PATTERN water_bubble ở trên.
                 shouldRemove = updatePyroBurstZoneEffect(fx, dt);
+            } else if (behavior === 'vortex_pull') {
+                shouldRemove = updateVortexPullEffect(fx, dt);
+            } else if (behavior === 'wind_field') {
+                shouldRemove = updateWindFieldEffect(fx, dt);
+            } else if (behavior === 'ground_slam') {
+                shouldRemove = updateGroundSlamEffect(fx, dt);
+            } else if (behavior === 'rose_field') {
+                shouldRemove = updateRoseFieldEffect(fx, dt);
             } else {
                 shouldRemove = updateSmallShotEffect(fx, dt);
             }
@@ -356,7 +383,10 @@ function spawnArrow(character, origin, dir, scaling, impact, overrides) {
 
     // Placeholder hình học đơn giản — thon dài theo trục bay, dễ nhận diện bằng mắt khi test.
     // KHÔNG phải polish hình ảnh cuối cùng (ngoài phạm vi task "combat architecture").
-    const arrowMesh = createArrowVisualMesh(ov.color);
+    // Character #6 (Catalyst): visual 'orb' = quả cầu năng lượng phát sáng thay cho thân mũi tên.
+    const arrowMesh = (ov.visual === 'orb')
+        ? new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshBasicMaterial({ color: (typeof ov.color === 'number') ? ov.color : 0xffffff }))
+        : createArrowVisualMesh(ov.color);
     arrowMesh.position.copy(origin);
     // Xoay mesh để trục dài (Y cục bộ của CylinderGeometry) khớp hướng bay ban đầu — cập nhật lại
     // mỗi frame theo velocity thực tế trong updateArrowEffect() (để mũi tên "cúi đầu" theo gravity).
@@ -365,6 +395,14 @@ function spawnArrow(character, origin, dir, scaling, impact, overrides) {
 
     const speed = (typeof ov.speed === 'number') ? ov.speed : 24;
     const velocity = forward.clone().multiplyScalar(speed);
+
+    // Task 3 (Combat VFX): màu vệt bay + chớp phóng. Mũi tên mang element thật (Charged Attack level
+    // có element) -> màu nguyên tố đó; mũi tên thường (vật lý) -> vàng nhạt trung tính. Chỉ nhân vật
+    // opt-in visualConfig.vfxElement mới có (Archer).
+    const arrowVfxOn = !!getCharacterVfxElement(character) && !!window.spawnMuzzlePuff;
+    const arrowElement = (typeof ov.element === 'string') ? ov.element : null;
+    const arrowTrailColor = arrowElement ? window.getElementVfx(arrowElement).main : 0xfef3c7;
+    if (arrowVfxOn) window.spawnMuzzlePuff(origin, forward, arrowElement ? window.getElementVfx(arrowElement).light : 0xfffbeb);
 
     player.activeEffects.arrows.push({
         type: 'arrow',
@@ -388,7 +426,10 @@ function spawnArrow(character, origin, dir, scaling, impact, overrides) {
         // implement Element Application/Aura/Reaction"). Arrow Normal Attack (không truyền qua
         // overrides) mặc định null/0 — vô hại, nhất quán với Level 0 "không Element".
         element: (typeof ov.element !== 'undefined') ? ov.element : null,
-        elementIntensity: (typeof ov.elementIntensity === 'number') ? ov.elementIntensity : 0
+        elementIntensity: (typeof ov.elementIntensity === 'number') ? ov.elementIntensity : 0,
+        vfxTrailColor: arrowVfxOn ? arrowTrailColor : null, // Task 3 — null = không vẽ vệt (nhân vật chưa opt-in)
+        hitboxSize: (typeof ov.hitboxSize === 'number') ? ov.hitboxSize : 0.35, // Character #6: orb to hơn mũi tên
+        sweep: ov.sweep === true
     });
 }
 window.spawnArrow = spawnArrow;
@@ -417,6 +458,29 @@ function updateArrowEffect(arrow, dt) {
 
     const prevPosition = arrow.mesh.position.clone();
     arrow.mesh.position.addScaledVector(arrow.velocity, dt);
+    // Character #6 — sweep (chỉ projectile khai báo sweep: true, vd orb Catalyst): nếu quãng bay 1 frame dài
+    // hơn hitbox (frame dài/FPS thấp), dò các điểm trung gian; gặp enemy thì dừng orb tại điểm đó để nhánh
+    // collision bên dưới xử lý như bình thường -> không bay xuyên qua quái. Bow (không khai báo) giữ nguyên.
+    if (arrow.sweep) {
+        const travel = arrow.mesh.position.distanceTo(prevPosition);
+        const stepLen = Math.max(0.1, (arrow.hitboxSize || 0.35) * 0.8);
+        const steps = Math.ceil(travel / stepLen);
+        if (steps > 1) {
+            const probe = new AABB();
+            const probeObj = { position: new THREE.Vector3() };
+            let found = false;
+            for (let k = 1; k < steps && !found; k++) {
+                probeObj.position.lerpVectors(prevPosition, arrow.mesh.position, k / steps);
+                probe.updateFromObject(probeObj, arrow.hitboxSize, arrow.hitboxSize, arrow.hitboxSize);
+                for (let j = 0; j < enemies.length; j++) {
+                    if (enemies[j].alive && intersectAABB(probe, enemies[j].aabb)) { found = true; break; }
+                }
+            }
+            if (found) arrow.mesh.position.copy(probeObj.position);
+        }
+    }
+    // Task 3 (Combat VFX): vệt bay (pooled dot) — thể hiện đường đạn, dễ đọc trên mobile.
+    if (arrow.vfxTrailColor != null && window.spawnWeaponTrail) window.spawnWeaponTrail(arrow.mesh.position, arrow.vfxTrailColor, arrow.element ? 0.9 : 0.6);
 
     // Xoay mesh theo hướng bay THỰC TẾ mỗi frame (mũi tên "cúi đầu" dần theo gravity — hệ quả
     // trực quan của physics-based trajectory, không phải animation soạn tay).
@@ -428,7 +492,7 @@ function updateArrowEffect(arrow, dt) {
     // collision primitive mới. Kiểm tra ENEMY TRƯỚC (spec mục 3 "Arrow -> Enemy": collision -> hit
     // event -> damage -> destroy arrow NGAY, không tiếp tục kiểm tra world cùng frame đó).
     const aAABB = new AABB();
-    const arrowHitboxSize = 0.35; // nhỏ, phù hợp mũi tên mảnh — không phải số liệu balance cuối
+    const arrowHitboxSize = arrow.hitboxSize || 0.35; // nhỏ, phù hợp mũi tên mảnh — Catalyst orb khai báo riêng
     aAABB.updateFromObject(arrow.mesh, arrowHitboxSize, arrowHitboxSize, arrowHitboxSize);
 
     for (let j = 0; j < enemies.length; j++) {
@@ -445,7 +509,10 @@ function updateArrowEffect(arrow, dt) {
         sfx.playHit();
         cameraState.shakeTimer = COMBAT_FEEL_CONFIG.cameraShake.duration;
         cameraState.shakeIntensity = COMBAT_FEEL_CONFIG.cameraShake.intensity;
-        spawnCombatSparks(arrow.mesh.position, arrow.velocity.clone().normalize());
+        // Task 3 (Combat VFX): chỉ ở nhánh TRÚNG thật — hiệu ứng theo element CỦA MŨI TÊN (null = vật lý)
+        // và độ nặng từ arrow.impact. Nhân vật chưa opt-in -> tia lửa trắng như cũ.
+        if (arrow.vfxTrailColor != null && window.spawnHitImpact) window.spawnHitImpact(arrow.mesh.position, arrow.velocity.clone().normalize(), { element: arrow.element, weight: window.impactWeight(arrow.impact) });
+        else spawnCombatSparks(arrow.mesh.position, arrow.velocity.clone().normalize());
         if (!enemy.alive) spawnDeathParticles(enemy.position);
 
         // Spec mục 3 "Arrow -> Enemy": Hit Event -> Damage -> Destroy Arrow — KHÔNG "stick" như
@@ -470,6 +537,9 @@ function updateArrowEffect(arrow, dt) {
         // "ngập" nửa trong khối khi cắm, nhất quán cảm giác với cách player/enemy AABB resolve va
         // chạm bằng vị trí frame trước (xem updatePhysics(), file 08).
         arrow.mesh.position.copy(prevPosition);
+        // Task 3 (Combat VFX): TRƯỢT (cắm vào vật cản) -> bụi xám, không màu nguyên tố, không vòng chớp —
+        // không thể nhầm với trúng đòn.
+        if (arrow.vfxTrailColor != null && window.spawnDustPuff) window.spawnDustPuff(arrow.mesh.position);
         return false; // KHÔNG splice — arrow tiếp tục tồn tại (đã cắm) cho tới khi hết stuckLifeTime
     }
 
@@ -570,6 +640,8 @@ function updateSmallShotEffect(proj, dt) {
 
             if (isHydroProj) {
                 spawnHydroSplash(proj.mesh.position, proj.dir, false);
+                // Task 3 (Combat VFX): hiệu ứng trúng đòn nhỏ gọn (đạn Hold bắn liên tục — weight light).
+                if (window.spawnHitImpact && getCharacterVfxElement(proj.character)) window.spawnHitImpact(proj.mesh.position, proj.dir, { element: getCharacterVfxElement(proj.character), weight: 'light' });
                 triggerHydroFlash();
                 sfx.playHydroSplash();
                 if (enemy.bodyMesh) {
@@ -696,6 +768,20 @@ function runWaterBubbleEffect(slot, character, skillData, dir) {
 
     burstGroup.position.copy(player.position).addScaledVector(forward, 1.2); // GIỮ NGUYÊN
     burstGroup.position.y = player.position.y; // GIỮ NGUYÊN
+    // Task 3 (Combat VFX): KÍCH HOẠT Burst — sóng nước lan rộng dưới chân + cột giọt nước bắn lên +
+    // chớp tại điểm quả cầu xuất hiện. Chỉ báo hiệu kích hoạt; damage vẫn chỉ do tick va chạm của quả cầu.
+    const burstVfx = getCharacterVfxElement(character);
+    if (burstVfx && window.spawnGroundRing) {
+        const prof = window.getElementVfx(burstVfx);
+        const feet = window.groundPointUnder(player.position);
+        window.spawnGroundRing(feet, 3.0, prof.main, { life: 0.55, fill: true, thickness: 0.14 });
+        window.spawnGroundRing(feet, 1.8, prof.light, { life: 0.4, startRatio: 0.2 });
+        for (let i = 0; i < 14; i++) {
+            const a = (i / 14) * Math.PI * 2;
+            window.spawnDot(player.position, { color: i % 2 ? prof.main : prof.light, life: 0.6, vel: new THREE.Vector3(Math.cos(a) * 3.2, 5 + Math.random() * 2, Math.sin(a) * 3.2), gravity: 14, size: 1.1, endSize: 0.5 });
+        }
+        window.spawnFacingRing(burstGroup.position, 2.0, prof.light, { life: 0.3 });
+    }
     scene.add(burstGroup);
 
     // GIỮ NGUYÊN mọi giá trị khởi tạo — chỉ đổi NƠI LƯU: fx.custom thay vì field rời trên player.
@@ -789,6 +875,17 @@ function runPyroBurstZoneEffect(slot, character, skillData, dir) {
         }
     });
 
+    // Task 3 (Combat VFX): KÍCH HOẠT Burst — chớp lửa quanh chân + tàn lửa bốc lên. Các HIT thật của
+    // Burst có hiệu ứng riêng tại đúng mốc thời gian của từng hit (updatePyroBurstZoneEffect).
+    const zoneVfx = getCharacterVfxElement(character);
+    if (zoneVfx && window.spawnGroundRing) {
+        const prof = window.getElementVfx(zoneVfx);
+        window.spawnGroundRing(window.groundPointUnder(player.position), 2.2, prof.light, { life: 0.4, startRatio: 0.2 });
+        for (let i = 0; i < 10; i++) {
+            window.spawnDot(player.position, { color: i % 2 ? prof.main : prof.light, life: 0.55, vel: new THREE.Vector3((Math.random() - 0.5) * 3, 3 + Math.random() * 2, (Math.random() - 0.5) * 3), gravity: -1.5, drag: 1.5, size: 1.1, endSize: 0.2 });
+        }
+    }
+
     pulseBurstButton(); // GIỮ NGUYÊN pattern chung mọi Burst
 }
 
@@ -837,6 +934,13 @@ function updatePyroBurstZoneEffect(fx, dt) {
         c.hitsTriggered[hitIndex] = true;
 
         const hitImpact = (hitEntry.impact && typeof hitEntry.impact.type === 'string') ? { type: hitEntry.impact.type } : { type: 'light' };
+        // Task 3 (Combat VFX): quạt lửa quét ĐÚNG range/coneDot của hit này, tại ĐÚNG thời điểm hit mở —
+        // người chơi thấy nhịp các đợt damage thật (dù có trúng ai hay không).
+        const zoneHitVfx = getCharacterVfxElement(character);
+        if (zoneHitVfx && window.spawnConeFlash) {
+            const zc = hitEntry.aoe || fx.skillData.aoe || { range: 7, coneDot: 0.3 };
+            window.spawnConeFlash(fx.mesh.position, fx.dir, zc.range, zc.coneDot, window.getElementVfx(zoneHitVfx).main, { life: 0.3, opacity: 0.55 });
+        }
 
         for (let j = 0; j < enemies.length; j++) {
             const enemy = enemies[j];
@@ -855,7 +959,8 @@ function updatePyroBurstZoneEffect(fx, dt) {
             sfx.playHit();
             cameraState.shakeTimer = COMBAT_FEEL_CONFIG.cameraShake.duration;
             cameraState.shakeIntensity = COMBAT_FEEL_CONFIG.cameraShake.intensity;
-            spawnCombatSparks(enemy.position, pushDir);
+            if (zoneHitVfx && window.spawnHitImpact) window.spawnHitImpact(enemy.position, pushDir, { element: zoneHitVfx, weight: window.impactWeight(hitImpact) });
+            else spawnCombatSparks(enemy.position, pushDir);
             if (!enemy.alive) spawnDeathParticles(enemy.position);
         }
     }
@@ -868,6 +973,14 @@ function updatePyroBurstZoneEffect(fx, dt) {
         if (c.elapsed >= finalTime && !c.finalHitTriggered) {
             c.finalHitTriggered = true;
             const finalImpact = (finalHit.impact && typeof finalHit.impact.type === 'string') ? { type: finalHit.impact.type } : { type: 'launch' };
+            // Task 3 (Combat VFX): đợt CUỐI — quạt lửa đậm + lớp trong, tại vùng Burst.
+            const finalVfx = getCharacterVfxElement(character);
+            if (finalVfx && window.spawnConeFlash) {
+                const fc = finalHit.aoe || fx.skillData.aoe || { range: 7, coneDot: 0.3 };
+                const prof = window.getElementVfx(finalVfx);
+                window.spawnConeFlash(fx.mesh.position, fx.dir, fc.range, fc.coneDot, prof.light, { life: 0.45, opacity: 0.8 });
+                window.spawnConeFlash(fx.mesh.position, fx.dir, fc.range * 0.7, fc.coneDot, prof.main, { life: 0.35, opacity: 0.7 });
+            }
 
             for (let j = 0; j < enemies.length; j++) {
                 const enemy = enemies[j];
@@ -885,7 +998,8 @@ function updatePyroBurstZoneEffect(fx, dt) {
                 enemy.takeDamage(dmg, pushDir, true, withDamageSource(finalImpact, character));
                 c.hasHitList.push(hitKey);
 
-                spawnCombatSparks(enemy.position, pushDir);
+                if (finalVfx && window.spawnHitImpact) window.spawnHitImpact(enemy.position, pushDir, { element: finalVfx, weight: window.impactWeight(finalImpact) });
+                else spawnCombatSparks(enemy.position, pushDir);
                 if (!enemy.alive) spawnDeathParticles(enemy.position);
             }
 
@@ -898,7 +1012,14 @@ function updatePyroBurstZoneEffect(fx, dt) {
 
     // Kết thúc khi hết duration — TẤT CẢ hits[]/finalHit lúc này đã chắc chắn được xử lý (duration
     // luôn >= finalHit.time theo data hợp lệ, nhưng vẫn check độc lập để an toàn nếu data sai).
-    return c.elapsed >= c.duration;
+    // Alpha M1 (BUG-03): trước M1 chỉ trả true (dispatcher splice state) mà KHÔNG gỡ mesh vùng quạt khỏi
+    // scene — mỗi lần Burst để lại 1 mesh mờ + geometry/material không giải phóng. Dọn đúng pattern các
+    // effect khác (cleanupEffect: scene.remove + dispose) trước khi báo kết thúc.
+    if (c.elapsed >= c.duration) {
+        cleanupEffect(fx);
+        return true;
+    }
+    return false;
 }
 
 // Trả về true nếu cần splice khỏi list (dispatcher updateActiveEffects() lo việc splice thật).
@@ -958,13 +1079,13 @@ function updateWaterBubbleEffect(fx, dt) {
                 }
                 c.staggeredEnemies[enemy.id] = skillData.pull.largeEnemyStaggerDuration;
             } else {
-                const pullDir = new THREE.Vector3().subVectors(bPos, enemy.position);
-                pullDir.y = 0;
-                if (pullDir.lengthSq() > 0.0001) {
-                    pullDir.normalize();
-                    enemy.velocity.x += pullDir.x * skillData.pull.smallEnemyForce * dt * 10;
-                    enemy.velocity.z += pullDir.z * skillData.pull.smallEnemyForce * dt * 10;
-                }
+                // Alpha M1 (BUG-05): trước M1 cộng lực vào enemy.velocity.x/z — Slime KHÔNG tích phân
+                // velocity.x/z (chỉ dùng jumpVelocity/knockback) nên quả cầu không hề kéo được quái, còn
+                // velocity bị cộng dồn rác mãi mãi. Nay dùng CHUNG applyControlledPull() của Character #4
+                // (bước kéo có giới hạn mỗi frame, không vượt tâm, có va chạm tĩnh, không teleport): tốc độ
+                // kéo = pull.smallEnemyForce (m/s), dừng ở mép quả cầu (skillData.radius) để quái nằm
+                // trong vùng damage tick. AI/di chuyển/chết của quái giữ nguyên — pull chỉ cộng thêm 1 bước.
+                applyControlledPull(enemy, bPos, skillData.pull.smallEnemyForce, skillData.radius, dt);
             }
         } else if (enemy.isLarge && c.staggeredEnemies[enemy.id] > 0) {
             enemy.velocity.x *= skillData.pull.largeEnemySlowFactor;
@@ -987,6 +1108,8 @@ function updateWaterBubbleEffect(fx, dt) {
             const bubbleFinalDamage = calculatePlayerToEnemyDamage(c.character, c.scaling, enemy);
             enemy.takeDamage(bubbleFinalDamage, pushDir, true, withDamageSource(null, c.character));
             spawnHydroSplash(bPos.clone(), pushDir, true);
+            // Task 3 (Combat VFX): mỗi TICK damage thật của quả cầu -> hiệu ứng trúng đòn tại enemy.
+            if (window.spawnHitImpact && getCharacterVfxElement(c.character)) window.spawnHitImpact(enemy.position, pushDir, { element: getCharacterVfxElement(c.character), weight: 'light' });
             triggerHydroFlash();
             sfx.playHydroSplash();
 
@@ -1077,7 +1200,8 @@ function deployElectroReactiveEffect(character) {
 
         // --- HP Polling state (per-instance — mỗi effect có bảng riêng, KHÔNG dùng chung 1 bảng
         // toàn cục, đảm bảo multi-instance hoạt động độc lập đúng nghĩa) ---
-        lastKnownHp: {},           // map enemy.id -> hp đã ghi nhận frame trước
+        lastKnownHp: {},           // map enemy.id -> hp đã ghi nhận frame trước (giữ cho debug/tương thích)
+        lastKnownDamageSeq: {},    // map enemy.id -> damageEventSeq đã ghi nhận frame trước (nguồn phát hiện hit)
         perEnemyCooldownTimer: {}, // map enemy.id -> cooldown còn lại trước khi trigger lại được
 
         // --- Coordinated Attack config (snapshot lúc cast, ĐÚNG PATTERN decoy.explosionScaling) ---
@@ -1088,6 +1212,14 @@ function deployElectroReactiveEffect(character) {
     };
 
     activeElectroEffects.push(effect);
+
+    // Readability Batch — phản hồi LÚC CAST (trước đây hoàn toàn không có gì hiển thị): tia sét đánh
+    // xuống chính nhân vật + vòng Electro lan ra quanh chân. Chỉ hiển thị, không gây damage (effect
+    // này chỉ gây damage qua Coordinated Attack khi proc, đúng thiết kế).
+    if (window.spawnElectroStrike && player && player.position) {
+        window.spawnElectroStrike(player.position.clone().add(new THREE.Vector3(0, 0.3, 0)), { color: window.FX_COLORS.electroBright });
+        window.spawnGroundRing(window.groundPointUnder(player.position), 2.4, window.FX_COLORS.electro, { life: 0.5, fill: true });
+    }
     return effect;
 }
 window.deployElectroReactiveEffect = deployElectroReactiveEffect;
@@ -1129,6 +1261,7 @@ function updateElectroReactiveEffect(effect, dt) {
         if (!enemy.alive) {
             // Dọn dẹp — enemy chết, xóa polling state để tránh so sánh nhầm lúc respawn (giữ nguyên id).
             delete effect.lastKnownHp[enemy.id];
+            delete effect.lastKnownDamageSeq[enemy.id];
             delete effect.perEnemyCooldownTimer[enemy.id];
             continue;
         }
@@ -1137,8 +1270,13 @@ function updateElectroReactiveEffect(effect, dt) {
             effect.perEnemyCooldownTimer[enemy.id] -= dt;
         }
 
-        const prevHp = effect.lastKnownHp[enemy.id];
-        if (prevHp !== undefined && enemy.hp < prevHp) {
+        // Phát hiện "vừa có damage event" qua enemy.damageEventSeq (DAMAGE EVENT CONTRACT, enemies.js)
+        // thay vì so HP giảm: HP polling KHÔNG thấy được hit trên dummy bất tử (HP không bao giờ đổi)
+        // -> Coordinated Attack không proc -> không có hạt năng lượng. Quy tắc lọc nguồn
+        // (canTriggerReactiveEffects), per-enemy cooldown, tối đa 1 hạt/frame GIỮ NGUYÊN.
+        const prevSeq = effect.lastKnownDamageSeq[enemy.id];
+        const curSeq = enemy.damageEventSeq || 0;
+        if (prevSeq !== undefined && curSeq > prevSeq) {
             const src = enemy.lastDamageSource;
             const canTrigger = !src || src.canTriggerReactiveEffects !== false;
             const cooldownReady = !(effect.perEnemyCooldownTimer[enemy.id] > 0);
@@ -1160,7 +1298,11 @@ function updateElectroReactiveEffect(effect, dt) {
                 });
                 enemy.takeDamage(dmg, pushDir, false, coordinatedImpactWithSource);
 
-                spawnCombatSparks(enemy.position, pushDir);
+                // Readability Batch — Coordinated Attack phải NHẬN RA ĐƯỢC: tia sét tím đánh xuống
+                // enemy (thay cho tia lửa trắng chung của mọi đòn thường trước đây). Damage number đi
+                // kèm tự có style 'electro' qua impact.source.sourceType === 'coordinated_skill'.
+                if (window.spawnElectroStrike) window.spawnElectroStrike(enemy.position);
+                else spawnCombatSparks(enemy.position, pushDir);
                 if (!enemy.alive) spawnDeathParticles(enemy.position);
 
                 effect.perEnemyCooldownTimer[enemy.id] = effect.perEnemyCooldown;
@@ -1178,6 +1320,7 @@ function updateElectroReactiveEffect(effect, dt) {
         // CẬP NHẬT lastKnownHp SAU KHI xử lý xong (bao gồm cả HP đã bị coordinated attack vừa trừ
         // thêm nếu có proc) — đảm bảo KHÔNG đọc lại cùng 1 lần giảm HP ở frame kế tiếp.
         effect.lastKnownHp[enemy.id] = enemy.hp;
+        effect.lastKnownDamageSeq[enemy.id] = enemy.damageEventSeq || 0; // SAU KHI xử lý (gồm cả event của chính proc)
     }
 }
 window.updateElectroReactiveEffect = updateElectroReactiveEffect;
@@ -1194,6 +1337,17 @@ window.updateElectroReactiveEffect = updateElectroReactiveEffect;
 // KHÔNG gây damage ở đây — chỉ khởi động state machine, damage thật xảy ra ở
 // updateBurstActivationTick() (gọi từ game loop file 08) khi 'burstActivationActive' kết thúc.
 function startBurstActivation(character, burstData, dir) {
+    // BUGFIX (Character #4 — Polearm Thunder Burst): comment ở trên hàm này ghi rõ "gọi TỪ
+    // executeCharacterBurst() ngay khi Player bấm Burst (SAU KHI player.energy đã set 0..." — nhưng
+    // handleBurstKeyDown() (combat.js) KHÔNG BAO GIỜ thực sự set player.energy = 0 trước khi dispatch
+    // tới đây (khác hẳn runWaterBubbleEffect()/runPyroBurstZoneEffect(), 2 executor Burst còn lại,
+    // MỖI HÀM ĐỀU tự set player.energy = 0 ngay khi cast — xem dòng tương ứng trong 2 hàm đó). Hệ quả
+    // đã xác nhận qua test thực tế: Character #4 dùng Burst xong, Energy KHÔNG hề giảm, canUseBurst()
+    // (player.energy < player.maxEnergy) vẫn luôn true -> Burst dùng được liên tục không giới hạn,
+    // không đúng như comment mô tả và không nhất quán với 2 nhân vật còn lại. Sửa: tự reset Energy
+    // NGAY TẠI ĐÂY (điểm vào duy nhất của state machine này), ĐÚNG PATTERN 2 executor kia — không phụ
+    // thuộc vào combat.js phải làm đúng việc gọi trước, tự khép kín logic trong chính executor.
+    player.energy = 0;
     player.attackState = 'burstActivationWindup';
     player.attackTimer = (burstData.activationTiming && typeof burstData.activationTiming.windup === 'number')
         ? burstData.activationTiming.windup : 0.2;
@@ -1245,6 +1399,16 @@ function updateBurstActivationTick() {
         cameraState.shakeTimer = 0.35;
         cameraState.shakeIntensity = 0.5;
         sfx.playBurst();
+
+        // Readability Batch — Activation AoE: vòng tròn mở rộng tới ĐÚNG hitRadius đọc từ data
+        // (talents.burstActivation.hitRadius) — người chơi thấy chính xác vùng đã gây damage. Kèm
+        // tia sét lớn đánh xuống nhân vật báo hiệu BẮT ĐẦU Burst State.
+        if (window.spawnGroundRing) {
+            const activationRadius = (hitShapeConfig && typeof hitShapeConfig.hitRadius === 'number') ? hitShapeConfig.hitRadius : 3.0;
+            const groundCenter = window.groundPointUnder(player.position);
+            window.spawnGroundRing(groundCenter, activationRadius, window.FX_COLORS.electro, { life: 0.55, fill: true, thickness: 0.16 });
+            window.spawnElectroStrike(player.position.clone(), { big: true });
+        }
 
         // --- Vào Burst State ---
         const burstData = player.burstActivationBurstData;
@@ -1406,6 +1570,29 @@ function deployDecoy(character, position) {
     activeDecoys.push(decoy);
     syncActiveDecoyShim();
 
+    // Task 3 (Combat VFX) — ĐẶT Decoy (KHÔNG phải nổ): vòng mảnh, mờ đánh dấu ĐÚNG explosionRadius thật
+    // (vùng sẽ bị nổ sau này) gắn làm con của decoy.mesh -> tự dọn cùng Decoy (explodeDecoy dispose mọi
+    // con). Kèm chớp "cắm xuống" nhỏ. Không lửa, không tia lửa -> tách bạch với hiệu ứng nổ.
+    const decoyVfx = getCharacterVfxElement(character);
+    if (decoyVfx && window.spawnGroundRing) {
+        const prof = window.getElementVfx(decoyVfx);
+        const tele = new THREE.Mesh(
+            new THREE.RingGeometry(0.94, 1, 48),
+            new THREE.MeshBasicMaterial({ color: prof.main, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false })
+        );
+        tele.rotation.x = -Math.PI / 2;
+        tele.position.y = 0.06;
+        tele.scale.setScalar(decoy.explosionRadius / (decoy.mesh.scale.x || 1));
+        tele.userData.isDecoyTelegraph = true;
+        decoy.mesh.add(tele);
+        decoy.telegraphMat = tele.material;
+        window.spawnGroundRing(decoy.position, 1.4, prof.light, { life: 0.35, startRatio: 0.2, opacity: 0.8 });
+        for (let i = 0; i < 6; i++) {
+            const a = (i / 6) * Math.PI * 2;
+            window.spawnDot(decoy.position, { color: 0xe7e5e4, life: 0.3, vel: new THREE.Vector3(Math.cos(a) * 2, 1.2, Math.sin(a) * 2), gravity: 4, size: 0.8, endSize: 1.1, opacity: 0.6 });
+        }
+    }
+
     // Passive/Unique Mechanic — "Overwatch" (Phase 1): trigger NGAY khi Decoy deploy THÀNH CÔNG (đã
     // chốt qua Q&A — không phải lúc Explosion). Data-driven: chỉ áp dụng nếu character có
     // talents.passive.overwatch (Character #2 khai báo, nhân vật Decoy tương lai khác có thể không
@@ -1453,6 +1640,8 @@ function updateDecoyEntity(decoy, dt) {
     const timeLeft = decoy.lifetime - decoy.lifeTimer;
     const urgency = Math.max(0, 1 - timeLeft / decoy.lifetime);
     decoy.coreMat.emissiveIntensity = 0.4 + Math.sin(decoy.lifeTimer * (4 + urgency * 8)) * 0.3 + urgency * 0.3;
+    // Task 3: vòng báo vùng nổ nhấp nháy nhanh dần theo đúng urgency sẵn có (sắp hết lifetime).
+    if (decoy.telegraphMat) decoy.telegraphMat.opacity = 0.25 + 0.2 * (0.5 + 0.5 * Math.sin(decoy.lifeTimer * (4 + urgency * 10))) + urgency * 0.25;
 
     // Spec mục 7 nhánh 1 — Lifetime hết -> Explosion.
     if (decoy.lifeTimer >= decoy.lifetime) {
@@ -1503,7 +1692,9 @@ function explodeDecoy(decoy) {
         // combat.js) — KHÔNG hard-code enemy nào chắc chắn bị launch (spec mục 10 xác nhận).
         enemy.takeDamage(explosionDamage, pushDir, true, withDamageSource(decoy.explosionImpact, decoy.character));
 
-        spawnCombatSparks(enemy.position, pushDir);
+        // Task 3: trúng NỔ thật -> hiệu ứng Pyro theo impact của vụ nổ (launch).
+        if (window.spawnHitImpact && getCharacterVfxElement(decoy.character)) window.spawnHitImpact(enemy.position, pushDir, { element: getCharacterVfxElement(decoy.character), weight: window.impactWeight(decoy.explosionImpact) });
+        else spawnCombatSparks(enemy.position, pushDir);
         if (!enemy.alive) spawnDeathParticles(enemy.position);
     }
 
@@ -1512,6 +1703,17 @@ function explodeDecoy(decoy) {
     // GIỮ NGUYÊN — Explosion VFX/SFX/camera shake luôn phát dù có hit Enemy hay không (spec mục 4 chỉ
     // nói về Energy Particle, KHÔNG nói về feedback hình ảnh/âm thanh của chính vụ nổ).
     spawnCombatSparks(decoy.position, new THREE.Vector3(0, 1, 0));
+    // Task 3: vụ NỔ — vòng lửa lan tới ĐÚNG explosionRadius (vùng damage thật) + cột tàn lửa. Luôn hiện
+    // khi Decoy nổ (kể cả không trúng ai — vụ nổ vẫn xảy ra thật, chỉ không có damage).
+    if (window.spawnGroundRing && getCharacterVfxElement(decoy.character)) {
+        const prof = window.getElementVfx(getCharacterVfxElement(decoy.character));
+        window.spawnGroundRing(decoy.position, decoy.explosionRadius, prof.main, { life: 0.5, fill: true, thickness: 0.16, startRatio: 0.15 });
+        window.spawnFacingRing(decoy.position.clone().add(new THREE.Vector3(0, 0.8, 0)), 2.4, prof.light, { life: 0.3 });
+        for (let i = 0; i < 18; i++) {
+            const a = Math.random() * Math.PI * 2, r = Math.random() * 3;
+            window.spawnDot(decoy.position, { color: i % 3 ? prof.main : prof.light, life: 0.6 + Math.random() * 0.3, vel: new THREE.Vector3(Math.cos(a) * r, 4 + Math.random() * 3, Math.sin(a) * r), gravity: -1, drag: 1.2, size: 1.2, endSize: 0.2 });
+        }
+    }
     cameraState.shakeTimer = 0.3;
     cameraState.shakeIntensity = 0.4;
     sfx.playHit(); // PLACEHOLDER SFX Explosion
@@ -1608,3 +1810,933 @@ window.updateDecoyEntity = updateDecoyEntity;
 // Elemental Burst Validation — Pyro Burst Zone
 window.runPyroBurstZoneEffect = runPyroBurstZoneEffect;
 window.updatePyroBurstZoneEffect = updatePyroBurstZoneEffect;
+
+// ============================================================
+// Readability Batch (Character #3) — PER-FRAME COMBAT VISUALS
+// ============================================================
+// updateCharacterCombatVisuals(dt): gọi mỗi frame từ animate() (file 08, trong khối dt > 0 — dừng
+// theo hitstop như mọi simulation hình ảnh khác). CHỈ HIỂN THỊ, không đọc/ghi damage/HP/timer
+// gameplay nào — chỉ ĐỌC state có sẵn (attackState, isBurstStateActive, burstStateTimer).
+//   1. Spear trail: vệt sáng theo mũi vũ khí trong 'active'/'chargedActive' — data-driven qua
+//      visualConfig.attackTrailColor (chỉ nhân vật có khai báo mới có vệt).
+//   2. Burst State aura: vòng Electro xoay dưới chân suốt Burst State; nháy nhanh khi còn < 1.5s
+//      (báo sắp hết); khi Burst State kết thúc -> 1 vòng tan ra (báo đã thoát).
+let burstAuraMesh = null;
+let wasBurstStateActive = false;
+let burstAuraTime = 0;
+const _tipWorld = new THREE.Vector3();
+
+// getCharacterVfxElement(character): nguyên tố HIỂN THỊ của nhân vật (visualConfig.vfxElement, opt-in).
+// Trả null nếu nhân vật không khai báo -> nơi gọi giữ nguyên hiệu ứng cũ (Character #3 không khai báo
+// field này, nên toàn bộ hiệu ứng hiện có của #3 KHÔNG bị thay đổi).
+function getCharacterVfxElement(character) {
+    return (character && character.visualConfig && typeof character.visualConfig.vfxElement === 'string') ? character.visualConfig.vfxElement : null;
+}
+window.getCharacterVfxElement = getCharacterVfxElement;
+
+// Bow charge ring — 1 mesh duy nhất tạo lười (lazy), ẩn/hiện, KHÔNG tạo mới mỗi frame.
+let bowChargeRing = null;
+let bowChargeLastLevel = -1;
+let bowChargeTime = 0;
+const BOW_CHARGE_LEVEL_COLORS = [0xd6d3d1, 0xfbbf24, 0xf97316]; // Level 0 / 1 / 2 (full)
+function updateBowChargeVisual(dt) {
+    const aiming = !!player.isBowChargedAiming && !!window.getCurrentBowChargeLevel;
+    if (!aiming) {
+        if (bowChargeRing) bowChargeRing.visible = false;
+        bowChargeLastLevel = -1;
+        return;
+    }
+    const levels = window.getBowChargedAttackConfig().levels;
+    const current = window.getCurrentBowChargeLevel();
+    const levelIndex = Math.max(0, levels.indexOf(current));
+    const isMax = levelIndex === levels.length - 1 && levels.length > 1;
+    if (!bowChargeRing) {
+        const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.8, depthWrite: false });
+        bowChargeRing = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 32), mat);
+        bowChargeRing.renderOrder = 5;
+        window.scene.add(bowChargeRing);
+    }
+    bowChargeTime += dt;
+    const anchor = (player.sword) ? player.sword.getWorldPosition(_tipWorld) : _tipWorld.copy(player.position);
+    bowChargeRing.visible = true;
+    bowChargeRing.position.copy(anchor);
+    if (window.camera) bowChargeRing.quaternion.copy(window.camera.quaternion);
+    const colorIdx = Math.min(BOW_CHARGE_LEVEL_COLORS.length - 1, isMax ? BOW_CHARGE_LEVEL_COLORS.length - 1 : levelIndex);
+    bowChargeRing.material.color.setHex(BOW_CHARGE_LEVEL_COLORS[colorIdx]);
+    const pulse = isMax ? 0.08 * Math.sin(bowChargeTime * 14) : 0;
+    const r = 0.35 + 0.18 * levelIndex + pulse;
+    bowChargeRing.scale.setScalar(r);
+    bowChargeRing.material.opacity = isMax ? 0.95 : 0.55 + 0.15 * levelIndex;
+
+    if (bowChargeLastLevel !== -1 && levelIndex > bowChargeLastLevel && window.spawnFacingRing) {
+        // Vừa lên level -> chớp + tia lửa (full charge: to hơn, màu lửa).
+        window.spawnFacingRing(anchor, isMax ? 1.2 : 0.8, BOW_CHARGE_LEVEL_COLORS[colorIdx], { life: 0.25 });
+        for (let i = 0; i < (isMax ? 10 : 5); i++) {
+            const a = Math.random() * Math.PI * 2;
+            window.spawnDot(anchor, { color: BOW_CHARGE_LEVEL_COLORS[colorIdx], life: 0.3, vel: new THREE.Vector3(Math.cos(a) * 3, Math.sin(a) * 3, (Math.random() - 0.5) * 2), drag: 5, size: 0.8, endSize: 0.1 });
+        }
+    }
+    bowChargeLastLevel = levelIndex;
+}
+
+function updateCharacterCombatVisuals(dt) {
+    if (!player || !player.mesh || !window.scene) return;
+    const character = getActiveCharacterData();
+    const vis = character && character.visualConfig;
+
+    // --- 1. Spear trail ---
+    if (vis && typeof vis.attackTrailColor === 'number' && window.spawnWeaponTrail &&
+        (player.attackState === 'active' || player.attackState === 'chargedActive' || player.attackState === 'burstActivationActive')) {
+        const tip = player.sword && player.sword.userData && player.sword.userData.tip;
+        if (tip) {
+            // tipLocal (optional, Task 3): điểm mũi vũ khí trong toạ độ cục bộ của `tip` — kiếm của
+            // Traveler khai báo {z:1.35}; mũi giáo của Character #3 không khai báo -> giữ offset cũ.
+            const tl = player.sword.userData.tipLocal;
+            const tipWorld = tl ? _tipWorld.set(tl.x, tl.y, tl.z) : _tipWorld.set(0, 0, 0.12);
+            tip.localToWorld(tipWorld);
+            window.spawnWeaponTrail(tipWorld, player.isBurstStateActive ? window.FX_COLORS.electroBright : vis.attackTrailColor);
+        }
+    }
+
+    // --- Character #4 — Tailwind: luồng gió nhỏ quanh chân khi đang có buff VÀ đang di chuyển.
+    const twMember = partyState[window.activeCharacterIndex];
+    if (twMember && twMember.tailwindTimer > 0 && window.spawnDot && player.inputVelocity && player.inputVelocity.lengthSq() > 1 && Math.random() < 0.5) {
+        const twVfx = window.getElementVfx(getCharacterVfxElement(character) || character.element);
+        const a = Math.random() * Math.PI * 2;
+        const feet = window.groundPointUnder(player.position);
+        window.spawnDot(feet.add(new THREE.Vector3(Math.cos(a) * 0.5, 0.15, Math.sin(a) * 0.5)), { color: Math.random() < 0.5 ? twVfx.main : twVfx.light, life: 0.35, vel: new THREE.Vector3(-Math.sin(a) * 2.5, 0.8, Math.cos(a) * 2.5), drag: 2, size: 0.6, endSize: 0.15, opacity: 0.7 });
+    }
+
+    // --- 3. Bow charge indicator (Task 3) — CHỈ đọc state có sẵn: player.isBowChargedAiming +
+    // getCurrentBowChargeLevel() (cùng hàm Engine dùng để quyết định mũi tên bắn ra). Vòng quanh cây cung
+    // lớn dần và đổi màu theo Charge Level; lên level -> chớp + tia lửa. Không đổi charge/aim logic.
+    updateBowChargeVisual(dt);
+
+    // --- 2. Burst State aura ---
+    const active = !!player.isBurstStateActive;
+    if (active) {
+        if (!burstAuraMesh) {
+            const geo = new THREE.RingGeometry(0.95, 1.15, 40);
+            const mat = new THREE.MeshBasicMaterial({ color: window.FX_COLORS.electro, side: THREE.DoubleSide, transparent: true, opacity: 0.8, depthWrite: false });
+            burstAuraMesh = new THREE.Mesh(geo, mat);
+            burstAuraMesh.rotation.x = -Math.PI / 2;
+            window.scene.add(burstAuraMesh);
+        }
+        burstAuraTime += dt;
+        burstAuraMesh.visible = true;
+        const g = window.groundPointUnder(player.position);
+        burstAuraMesh.position.set(g.x, g.y + 0.06, g.z);
+        burstAuraMesh.rotation.z += dt * 2.5;
+        const endingSoon = player.burstStateTimer > 0 && player.burstStateTimer < 1.5;
+        const pulseSpeed = endingSoon ? 18 : 5;
+        const pulse = 0.5 + 0.5 * Math.sin(burstAuraTime * pulseSpeed);
+        burstAuraMesh.material.opacity = endingSoon ? 0.25 + 0.65 * pulse : 0.55 + 0.3 * pulse;
+        const s = 1.0 + 0.08 * pulse;
+        burstAuraMesh.scale.set(s, s, s);
+        // Mũi giáo sáng mạnh hơn trong Burst State.
+        const tip = player.sword && player.sword.userData && player.sword.userData.tip;
+        if (tip && tip.material && tip.material.emissive) tip.material.emissiveIntensity = 1.1 + 0.4 * pulse;
+    } else {
+        if (burstAuraMesh) burstAuraMesh.visible = false;
+        if (wasBurstStateActive) {
+            // Vừa thoát Burst State -> vòng tan ra + trả độ sáng mũi giáo về mức thường.
+            if (window.spawnGroundRing) window.spawnGroundRing(window.groundPointUnder(player.position), 2.0, window.FX_COLORS.electro, { life: 0.45, startRatio: 0.55, opacity: 0.6 });
+            const tip = player.sword && player.sword.userData && player.sword.userData.tip;
+            if (tip && tip.material && tip.material.emissive) tip.material.emissiveIntensity = 0.55;
+        }
+    }
+    wasBurstStateActive = active;
+}
+window.updateCharacterCombatVisuals = updateCharacterCombatVisuals;
+
+// ============================================================
+// Task 3 (Combat VFX) — CHARACTER SWITCH CUE
+// ============================================================
+// spawnSwitchCue(characterId): gọi từ switchToCharacter() SAU KHI đổi thành công (return true) — vòng
+// sáng dưới chân + cột hạt bốc lên theo NGUYÊN TỐ của nhân vật vừa vào sân (vfxElement nếu có, không
+// thì element thật trong roster). Ngắn (~0.5s), không chặn input, không đổi gì trong gameplay.
+function spawnSwitchCue(characterId) {
+    const character = CHARACTER_ROSTER[characterId];
+    if (!character || !window.spawnGroundRing) return;
+    const prof = window.getElementVfx(getCharacterVfxElement(character) || character.element);
+    const feet = window.groundPointUnder(player.position);
+    window.spawnGroundRing(feet, 1.5, prof.main, { life: 0.45, startRatio: 0.25, opacity: 0.8 });
+    for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        window.spawnDot(feet.clone().add(new THREE.Vector3(Math.cos(a) * 0.7, 0.1, Math.sin(a) * 0.7)), { color: i % 2 ? prof.main : prof.light, life: 0.5, vel: new THREE.Vector3(0, 3.5 + Math.random() * 1.5, 0), drag: 2, size: 0.9, endSize: 0.15 });
+    }
+}
+window.spawnSwitchCue = spawnSwitchCue;
+
+// ============================================================
+// CHARACTER #4 — ANEMO SWORD (anemo_sword)
+// ============================================================
+
+// --- Controlled pull (dùng chung cho Skill Vortex Pull + Burst Eye of the Tempest của #4) ---
+// Kéo 1 enemy về điểm hội tụ `point` theo mặt phẳng ngang, BƯỚC CÓ GIỚI HẠN mỗi frame:
+//   step = min(speed * weightFactor * dt, khoảng cách còn lại - stopRadius)
+// -> không bao giờ vượt quá điểm hội tụ (không overshoot/dao động), không teleport. Sau mỗi bước chạy
+// resolveStaticCollisions() — CÙNG hàm va chạm tĩnh mà knockback của enemy đang dùng (enemies.js) — để
+// không bị kéo xuyên tường/obstacle. KHÔNG đụng knockback/jumpVelocity/launch (pull là kênh riêng).
+// Lý do không dùng enemy.velocity: Slime KHÔNG tích phân velocity.x/z (chỉ dùng jumpVelocity/knockback),
+// nên cộng lực vào velocity sẽ không có tác dụng (đã xác nhận khi audit).
+function getPullWeightFactor(enemy, weightFactorTable) {
+    const wc = (enemy.poise && enemy.poise.weightClass) || (enemy.isLarge ? 'heavy' : 'light');
+    const table = weightFactorTable || {};
+    return (typeof table[wc] === 'number') ? table[wc] : 1.0;
+}
+
+function applyControlledPull(enemy, point, speed, stopRadius, dt) {
+    if (!enemy || !enemy.alive || dt <= 0) return false;
+    const dx = point.x - enemy.position.x;
+    const dz = point.z - enemy.position.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist <= stopRadius || dist < 0.0001) return false;
+    const step = Math.min(speed * dt, dist - stopRadius);
+    if (step <= 0) return false;
+    enemy.position.x += (dx / dist) * step;
+    enemy.position.z += (dz / dist) * step;
+    if (enemy.mesh) enemy.mesh.position.copy(enemy.position);
+    if (window.resolveStaticCollisions && enemy.mesh) window.resolveStaticCollisions(enemy, enemy.width, enemy.height, enemy.depth, dt);
+    if (enemy.isGrounded && typeof enemy.alignToGround === 'function') enemy.alignToGround();
+    if (enemy.mesh) enemy.mesh.position.copy(enemy.position);
+    if (enemy.aabb && enemy.mesh) enemy.aabb.updateFromObject(enemy.mesh, enemy.width, enemy.height, enemy.depth);
+    return true;
+}
+window.applyControlledPull = applyControlledPull;
+
+function horizontalDistance(a, b) {
+    const dx = a.x - b.x, dz = a.z - b.z;
+    return Math.sqrt(dx * dx + dz * dz);
+}
+
+// --- Passive Tailwind ---
+function getTailwindConfig(character) {
+    const t = character && character.talents && character.talents.passive && character.talents.passive.tailwind;
+    return (t && typeof t.duration === 'number') ? t : null;
+}
+// Hệ số tốc độ di chuyển cho nhân vật ĐANG ACTIVE (1 nếu không có buff). Đọc bởi updatePhysics (file 08).
+function getTailwindSpeedMultiplier() {
+    const member = partyState[window.activeCharacterIndex];
+    if (!member || !(member.tailwindTimer > 0)) return 1;
+    const cfg = getTailwindConfig(CHARACTER_ROSTER[member.id]);
+    return (cfg && typeof cfg.moveSpeedMultiplier === 'number') ? cfg.moveSpeedMultiplier : 1;
+}
+window.getTailwindSpeedMultiplier = getTailwindSpeedMultiplier;
+
+// Cast Skill thành công -> ĐẶT LẠI (refresh, không cộng dồn) thời gian buff của đúng nhân vật đã cast.
+function grantTailwind(character) {
+    const cfg = getTailwindConfig(character);
+    if (!cfg) return;
+    const member = partyState.find(m => m && m.id === character.id);
+    if (member) member.tailwindTimer = cfg.duration;
+}
+
+// --- Elemental Skill: Vortex Pull ---
+function buildVortexVisual(skillData, vfx) {
+    const group = new THREE.Group();
+    const ringA = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.06, 6, 36), new THREE.MeshBasicMaterial({ color: vfx.main, transparent: true, opacity: 0.8, depthWrite: false }));
+    const ringB = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.05, 6, 32), new THREE.MeshBasicMaterial({ color: vfx.light, transparent: true, opacity: 0.85, depthWrite: false }));
+    const ringC = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.04, 6, 24), new THREE.MeshBasicMaterial({ color: vfx.core, transparent: true, opacity: 0.9, depthWrite: false }));
+    ringA.rotation.x = Math.PI / 2; ringB.rotation.x = Math.PI / 2; ringC.rotation.x = Math.PI / 2;
+    ringB.position.y = 0.45; ringC.position.y = 0.9;
+    group.add(ringA); group.add(ringB); group.add(ringC);
+    // Chỉ báo mặt đất: vòng mảnh đúng bán kính KÉO (vùng ảnh hưởng thật).
+    const ground = new THREE.Mesh(new THREE.RingGeometry(0.96, 1, 48), new THREE.MeshBasicMaterial({ color: vfx.main, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }));
+    ground.rotation.x = -Math.PI / 2;
+    ground.scale.setScalar(skillData.vortex.pullRadius);
+    ground.position.y = -0.84;
+    group.add(ground);
+    return group;
+}
+
+function runVortexPullEffect(slot, character, skillData, dir) {
+    const v = skillData.vortex;
+    const forward = (dir ? dir.clone() : new THREE.Vector3(Math.sin(player.mesh.rotation.y), 0, Math.cos(player.mesh.rotation.y)));
+    forward.y = 0;
+    if (forward.lengthSq() < 0.0001) forward.set(Math.sin(player.mesh.rotation.y), 0, Math.cos(player.mesh.rotation.y));
+    forward.normalize();
+
+    // Điểm hội tụ (convergence point) — cố định từ lúc cast, trước mặt nhân vật.
+    const center = player.position.clone().addScaledVector(forward, v.forwardOffset);
+    center.y = window.groundPointUnder(center).y + 0.9;
+
+    const vfx = window.getElementVfx(getCharacterVfxElement(character) || character.element);
+    const group = buildVortexVisual(skillData, vfx);
+    group.position.copy(center);
+    group.scale.setScalar(0.3);
+    scene.add(group);
+
+    player.activeEffects[slot].push({
+        type: 'vortex_pull', mesh: group, skillData: skillData,
+        custom: { elapsed: 0, center: center, character: character, hitDone: false, vfx: vfx }
+    });
+
+    // Tư thế "vung kiếm" (squash như các Skill/Burst khác) + âm thanh + chớp gió tại điểm hội tụ.
+    player.mesh.scale.set(1.15, 0.85, 1.15);
+    sfx.playSwing();
+    if (window.spawnMuzzlePuff) window.spawnMuzzlePuff(player.position.clone().addScaledVector(forward, 1.0), forward, vfx.light);
+    if (window.spawnGroundRing) window.spawnGroundRing(window.groundPointUnder(center), v.pullRadius, vfx.light, { life: 0.4, startRatio: 1.0, opacity: 0.5, thickness: 0.05 });
+
+    grantTailwind(character); // Passive — cast Skill thành công
+}
+window.runVortexPullEffect = runVortexPullEffect;
+
+function updateVortexPullEffect(fx, dt) {
+    const c = fx.custom;
+    const v = fx.skillData.vortex;
+    c.elapsed += dt;
+
+    // 1) PULL — chỉ trong [0, pullDuration]; sau đó không còn lực nào.
+    if (c.elapsed <= v.pullDuration) {
+        for (let i = 0; i < enemies.length; i++) {
+            const e = enemies[i];
+            if (!e.alive) continue;
+            if (horizontalDistance(e.position, c.center) > v.pullRadius) continue;
+            applyControlledPull(e, c.center, v.pullSpeed * getPullWeightFactor(e, v.weightFactor), v.stopRadius, dt);
+        }
+        // Dải gió xoắn hút vào tâm (pooled dots) — thể hiện hướng kéo.
+        if (window.spawnDot) {
+            for (let k = 0; k < 2; k++) {
+                const a = Math.random() * Math.PI * 2;
+                const r = v.pullRadius * (0.55 + Math.random() * 0.4);
+                const p = new THREE.Vector3(c.center.x + Math.cos(a) * r, c.center.y - 0.5 + Math.random() * 0.8, c.center.z + Math.sin(a) * r);
+                const toC = new THREE.Vector3(c.center.x - p.x, 0, c.center.z - p.z).normalize();
+                const tang = new THREE.Vector3(-toC.z, 0, toC.x);
+                const vel = toC.multiplyScalar(r / 0.45).addScaledVector(tang, 3.5);
+                window.spawnDot(p, { color: k ? c.vfx.main : c.vfx.light, life: 0.42, vel: vel, drag: 1.5, size: 0.8, endSize: 0.3 });
+            }
+        }
+    }
+
+    // 2) DAMAGE — ĐÚNG 1 event tại hitTime (độc lập với pull), trúng mỗi enemy tối đa 1 lần.
+    if (!c.hitDone && c.elapsed >= v.hitTime) {
+        c.hitDone = true;
+        const character = c.character;
+        const scaling = getTalentScaling(character, 'skillVortex');
+        const impact = getTalentImpact(character, 'skillVortex');
+        let hitCount = 0;
+        for (let i = 0; i < enemies.length; i++) {
+            const e = enemies[i];
+            if (!e.alive) continue;
+            if (horizontalDistance(e.position, c.center) > v.hitRadius || Math.abs(e.position.y - c.center.y) > 2.5) continue;
+            const pushDir = new THREE.Vector3(e.position.x - c.center.x, 0, e.position.z - c.center.z);
+            if (pushDir.lengthSq() < 0.0001) pushDir.set(0, 0, 1); else pushDir.normalize();
+            const dmg = calculatePlayerToEnemyDamage(character, scaling, e);
+            e.takeDamage(dmg, pushDir, false, withDamageSource(impact, character));
+            hitCount++;
+            if (window.spawnHitImpact) window.spawnHitImpact(e.position, pushDir, { element: getCharacterVfxElement(character) || character.element, weight: window.impactWeight(impact) });
+            if (!e.alive) spawnDeathParticles(e.position);
+        }
+        if (hitCount > 0) {
+            hitstopTimer = COMBAT_FEEL_CONFIG.hitStopDuration;
+            sfx.playHit();
+            cameraState.shakeTimer = COMBAT_FEEL_CONFIG.cameraShake.duration;
+            cameraState.shakeIntensity = COMBAT_FEEL_CONFIG.cameraShake.intensity;
+            const eg = fx.skillData.energyGeneration;
+            if (eg) EnergySystem.generateParticles(c.center, eg.particles, eg.element);
+        }
+        // Tín hiệu damage event (có trúng hay không): vòng gió bung ra đúng hitRadius.
+        if (window.spawnGroundRing) window.spawnGroundRing(window.groundPointUnder(c.center), v.hitRadius, c.vfx.light, { life: 0.3, startRatio: 0.25, thickness: 0.14 });
+        if (window.spawnFacingRing) window.spawnFacingRing(c.center, 1.8, c.vfx.core, { life: 0.22 });
+    }
+
+    // 3) Hình ảnh vortex: mở ra nhanh, xoay, co lại ở cuối vòng đời.
+    const life = v.lifetime;
+    const t = c.elapsed / life;
+    const s = t < 0.2 ? 0.3 + (t / 0.2) * 0.9 : t > 0.8 ? 1.2 * Math.max(0, (1 - t) / 0.2) : 1.2;
+    fx.mesh.scale.set(s, 1, s);
+    fx.mesh.children[0].rotation.z += dt * 9;
+    fx.mesh.children[1].rotation.z -= dt * 13;
+    fx.mesh.children[2].rotation.z += dt * 17;
+    const fade = t > 0.8 ? Math.max(0, (1 - t) / 0.2) : 1;
+    fx.mesh.children.forEach((m, i) => { m.material.opacity = (i === 3 ? 0.35 : 0.85) * fade; });
+
+    if (c.elapsed >= life) {
+        cleanupEffect(fx);
+        return true;
+    }
+    return false;
+}
+
+// --- Elemental Burst: Eye of the Tempest (vùng gió cố định) ---
+function buildWindFieldVisual(field, vfx) {
+    const group = new THREE.Group();
+    const boundary = new THREE.Mesh(new THREE.RingGeometry(0.965, 1, 64), new THREE.MeshBasicMaterial({ color: vfx.main, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false }));
+    boundary.rotation.x = -Math.PI / 2; boundary.scale.setScalar(field.radius);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(1, 48), new THREE.MeshBasicMaterial({ color: vfx.main, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false }));
+    disc.rotation.x = -Math.PI / 2; disc.scale.setScalar(field.radius); disc.position.y = -0.01;
+    group.add(boundary); group.add(disc);
+    // 3 dải gió cong xoay quanh tâm ở các bán kính khác nhau.
+    [0.35, 0.6, 0.85].forEach((rr, i) => {
+        const arc = new THREE.Mesh(new THREE.RingGeometry(0.93, 1, 40, 1, i * 2.1, 1.5), new THREE.MeshBasicMaterial({ color: i % 2 ? vfx.light : vfx.main, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
+        arc.rotation.x = -Math.PI / 2; arc.scale.setScalar(field.radius * rr); arc.position.y = 0.02 + i * 0.01;
+        group.add(arc);
+    });
+    // Tâm: vòng xoáy nhỏ dựng đứng — dễ nhận ra "mắt bão".
+    const eye = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.07, 6, 28), new THREE.MeshBasicMaterial({ color: vfx.core, transparent: true, opacity: 0.85, depthWrite: false }));
+    eye.rotation.x = Math.PI / 2; eye.position.y = 0.9;
+    group.add(eye);
+    return group;
+}
+
+function runWindFieldEffect(slot, character, burstData, dir) {
+    const field = burstData.field;
+    player.energy = 0; // consume Energy — ĐÚNG PATTERN mọi executor Burst hiện có
+    sfx.playBurst();
+    player.mesh.scale.set(1.22, 0.72, 1.22);
+
+    // Vị trí CỐ ĐỊNH tại lúc kích hoạt — không đi theo nhân vật.
+    const center = window.groundPointUnder(player.position);
+    const vfx = window.getElementVfx(getCharacterVfxElement(character) || character.element);
+    const group = buildWindFieldVisual(field, vfx);
+    group.position.set(center.x, center.y + 0.06, center.z);
+    scene.add(group);
+
+    player.activeEffects[slot].push({
+        type: 'wind_field', mesh: group, skillData: burstData,
+        custom: {
+            elapsed: 0,
+            duration: field.duration,
+            center: center,
+            character: character,
+            vfx: vfx,
+            pulsesTriggered: field.pulses.map(() => false),
+            hasHitList: [],   // "p<pulseIndex>:<enemyId>"
+            pullUntil: -1
+        }
+    });
+
+    // Kích hoạt (KHÔNG gây damage): cột gió + vòng bung ra đúng bán kính vùng.
+    if (window.spawnGroundRing) {
+        window.spawnGroundRing(center, field.radius, vfx.light, { life: 0.55, startRatio: 0.1, thickness: 0.1, fill: true });
+        for (let i = 0; i < 16; i++) {
+            const a = (i / 16) * Math.PI * 2;
+            window.spawnDot(center.clone().add(new THREE.Vector3(Math.cos(a) * 1.2, 0.2, Math.sin(a) * 1.2)), { color: i % 2 ? vfx.main : vfx.light, life: 0.7, vel: new THREE.Vector3(-Math.sin(a) * 3, 5 + Math.random() * 2, Math.cos(a) * 3), drag: 1.5, size: 1.1, endSize: 0.2 });
+        }
+    }
+    pulseBurstButton();
+}
+window.runWindFieldEffect = runWindFieldEffect;
+
+function endWindFieldEffect(fx) {
+    const c = fx.custom;
+    if (window.spawnGroundRing) window.spawnGroundRing(c.center, fx.skillData.field.radius, c.vfx.light, { life: 0.5, startRatio: 1.0, opacity: 0.6, thickness: 0.06 });
+    for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        if (window.spawnDot) window.spawnDot(c.center.clone().add(new THREE.Vector3(Math.cos(a) * 2, 0.4, Math.sin(a) * 2)), { color: c.vfx.light, life: 0.5, vel: new THREE.Vector3(Math.cos(a) * 3, 1.5, Math.sin(a) * 3), drag: 2, size: 0.8, endSize: 0.1 });
+    }
+    cleanupEffect(fx);
+}
+
+function updateWindFieldEffect(fx, dt) {
+    const c = fx.custom;
+    const field = fx.skillData.field;
+    c.elapsed += dt;
+
+    // Hết duration -> kết thúc NGAY, không pulse/pull nào bắt đầu thêm.
+    if (c.elapsed >= c.duration) {
+        endWindFieldEffect(fx);
+        return true;
+    }
+
+    // PULSES — lịch rời rạc; mỗi pulse mở đúng 1 lần, mỗi enemy trúng tối đa 1 lần/pulse.
+    for (let pi = 0; pi < field.pulses.length; pi++) {
+        const pulse = field.pulses[pi];
+        if (c.pulsesTriggered[pi] || c.elapsed < pulse.time || pulse.time >= c.duration) continue;
+        c.pulsesTriggered[pi] = true;
+        c.pullUntil = c.elapsed + field.pull.pullDuration;
+
+        const character = c.character;
+        const scaling = getTalentScaling(character, 'burst');
+        scaling.multiplier *= (typeof pulse.damageMult === 'number') ? pulse.damageMult : 1;
+        const impact = (pulse.impact && pulse.impact.type) ? { type: pulse.impact.type } : { type: 'light' };
+        const isLast = pi === field.pulses.length - 1;
+        let hit = 0;
+
+        for (let i = 0; i < enemies.length; i++) {
+            const e = enemies[i];
+            if (!e.alive) continue;
+            const key = 'p' + pi + ':' + e.id;
+            if (c.hasHitList.includes(key)) continue;
+            if (horizontalDistance(e.position, c.center) > field.radius || Math.abs(e.position.y - c.center.y) > 3) continue;
+            const pushDir = new THREE.Vector3(c.center.x - e.position.x, 0, c.center.z - e.position.z); // hướng VÀO tâm (gió cuốn vào)
+            if (pushDir.lengthSq() < 0.0001) pushDir.set(0, 0, 1); else pushDir.normalize();
+            const dmg = calculatePlayerToEnemyDamage(character, scaling, e);
+            e.takeDamage(dmg, pushDir, false, withDamageSource(impact, character));
+            c.hasHitList.push(key);
+            hit++;
+            if (window.spawnHitImpact) window.spawnHitImpact(e.position, pushDir, { element: getCharacterVfxElement(character) || character.element, weight: window.impactWeight(impact) });
+            if (!e.alive) spawnDeathParticles(e.position);
+        }
+        if (hit > 0) {
+            sfx.playHit();
+            cameraState.shakeTimer = isLast ? 0.25 : 0.1;
+            cameraState.shakeIntensity = isLast ? 0.3 : 0.12;
+        }
+        // Nhịp pulse (có trúng hay không): sóng gió quét từ tâm ra biên — đồng bộ với damage event thật.
+        if (window.spawnGroundRing) window.spawnGroundRing(c.center, field.radius, isLast ? c.vfx.core : c.vfx.light, { life: isLast ? 0.5 : 0.38, startRatio: 0.12, thickness: isLast ? 0.1 : 0.06, opacity: isLast ? 0.9 : 0.7 });
+    }
+
+    // PULL ngắn sau mỗi pulse (không liên tục cả Burst).
+    if (c.elapsed <= c.pullUntil) {
+        for (let i = 0; i < enemies.length; i++) {
+            const e = enemies[i];
+            if (!e.alive) continue;
+            if (horizontalDistance(e.position, c.center) > field.radius) continue;
+            applyControlledPull(e, c.center, field.pull.pullSpeed * getPullWeightFactor(e, field.weightFactor), field.pull.stopRadius, dt);
+        }
+    }
+
+    // Hình ảnh: dải gió xoay, mắt bão xoay, mờ dần 0.6s cuối; hạt gió lác đác hút vào tâm.
+    const ch = fx.mesh.children;
+    ch[2].rotation.z += dt * 1.6; ch[3].rotation.z -= dt * 2.3; ch[4].rotation.z += dt * 3.1; ch[5].rotation.z += dt * 6;
+    const fade = Math.min(1, (c.duration - c.elapsed) / 0.6);
+    ch.forEach((m, i) => { m.material.opacity = [0.75, 0.1, 0.6, 0.6, 0.6, 0.85][i] * fade; });
+    if (window.spawnDot && Math.random() < 0.6) {
+        const a = Math.random() * Math.PI * 2, r = field.radius * (0.4 + Math.random() * 0.55);
+        const p = new THREE.Vector3(c.center.x + Math.cos(a) * r, c.center.y + 0.3 + Math.random() * 1.2, c.center.z + Math.sin(a) * r);
+        window.spawnDot(p, { color: c.vfx.light, life: 0.8, vel: new THREE.Vector3(-Math.sin(a) * 3 - Math.cos(a) * 1.5, 0.3, Math.cos(a) * 3 - Math.sin(a) * 1.5), drag: 0.5, size: 0.7, endSize: 0.2, opacity: 0.6 });
+    }
+    return false;
+}
+
+// --- Dọn dẹp khi đổi nhân vật (gọi từ switchToCharacter, TRƯỚC khi đổi) ---
+// Vortex Pull là hiệu ứng ngắn gắn với lần vung kiếm của nhân vật -> kết thúc ngay khi nhân vật rời sân
+// (không còn lực kéo nào). Vùng Burst Eye of the Tempest là vùng CỐ ĐỊNH -> tiếp tục tới hết duration
+// (cùng quy tắc với vùng Burst Pyro của Archer, vốn không bị huỷ khi đổi nhân vật).
+function onCharacterSwitchedOut(prevId) {
+    // Character #5/#6: Counter Stance / Violet Arc đang giữ của nhân vật rời sân -> huỷ sạch (không cooldown).
+    if (heldSkill.active && heldSkill.character && heldSkill.character.id === prevId) cancelHeldSkill('switch');
+    const list = player.activeEffects.skill;
+    for (let i = list.length - 1; i >= 0; i--) {
+        const fx = list[i];
+        if (fx.type === 'vortex_pull' && fx.custom && fx.custom.character && fx.custom.character.id === prevId) {
+            cleanupEffect(fx);
+            list.splice(i, 1);
+        }
+    }
+}
+window.onCharacterSwitchedOut = onCharacterSwitchedOut;
+
+// ============================================================
+// CHARACTER #5 / #6 (GI-CHAR-05-06) — HELD SKILL CONTROLLER + 2 BURST MỚI
+// ============================================================
+// HELD SKILL = Elemental Skill có SKILL_LIBRARY[...].inputMode === 'held'. Vòng đời DUY NHẤT:
+//   beginHeldSkill()  <- handleSkillKeyDown (phím E / touchstart nút Skill)
+//   updateHeldSkill() <- mỗi frame (updateCharacterKitTimers, gọi từ updateActiveEffects)
+//   releaseHeldSkill('release' | 'expire') <- handleSkillKeyUp (E / touchend / touchcancel) hoặc hết maxHold
+//   cancelHeldSkill('switch' | 'dead')     <- đổi nhân vật (onCharacterSwitchedOut) / nhân vật gục
+// Mỗi lần kích hoạt chỉ resolve ĐÚNG 1 kết quả (cờ `resolved` + endHeldSkill() dọn sạch trạng thái).
+// Tự hết giờ (maxHold) => KHÔNG bao giờ kẹt dù mất sự kiện thả tay (touch bị huỷ, mất focus...).
+//
+// Counter (Character #5, behavior 'counter_stance'):
+//   stance -> [đòn địch HỢP LỆ trúng trong cửa sổ phòng thủ] -> Counter (Normal | Perfect) + chặn damage
+//          -> [thả phím / hết giờ, không có đòn nào] -> Release Swing (đòn chém thường của Skill)
+//          -> [đổi nhân vật / gục]                    -> Interrupted (không cooldown, không damage)
+//   Đòn hợp lệ = đòn đi qua window.interceptIncomingAttack() — gọi từ window.applyEnemyAttackToPlayer()
+//   (enemies.js): cú nhảy tấn công của Slime + đòn của quái M2 (14-enemy-framework.js: chém cận chiến,
+//   đạn tầm xa, cú nện hạng nặng), đúng lúc nó THẬT SỰ trúng (tầm + khung tấn công + player không bất tử).
+//   Va chạm thân dummy, rơi độ cao, đòn có unblockable: true KHÔNG được tính.
+// Violet Arc (Character #6, behavior 'violet_arc'): thả trước tapThreshold = Tap; giữ lâu hơn = Hold
+//   (nạp dần tới maxHold rồi tự phóng). Tap/Hold có cooldown & năng lượng riêng.
+
+const heldSkill = { active: false, mode: null, character: null, skillData: null, elapsed: 0, resolved: false, visual: null, chargeFullFxDone: false };
+window.heldSkillState = heldSkill;
+// Nhật ký kết quả (chỉ để debug/test tự động — KHÔNG ảnh hưởng gameplay, giữ tối đa 40 mục).
+const heldSkillLog = window.heldSkillLog = [];
+function logHeldSkill(event, extra) {
+    heldSkillLog.push(Object.assign({ event: event, t: performance.now() }, extra || {}));
+    if (heldSkillLog.length > 40) heldSkillLog.shift();
+}
+
+function isHeldSkillActive() { return heldSkill.active; }
+window.isHeldSkillActive = isHeldSkillActive;
+
+function getHeldSkillMoveMultiplier() {
+    if (!heldSkill.active || !heldSkill.skillData || !heldSkill.skillData.held) return 1;
+    const m = heldSkill.skillData.held.moveMultiplier;
+    return (typeof m === 'number') ? m : 1;
+}
+window.getHeldSkillMoveMultiplier = getHeldSkillMoveMultiplier;
+
+function kitVfxColor(character, key) {
+    const el = getCharacterVfxElement(character);
+    return window.getElementVfx ? window.getElementVfx(el || 'physical')[key || 'main'] : 0xffffff;
+}
+
+function buildHeldSkillVisual(mode, character) {
+    const group = new THREE.Group();
+    const color = kitVfxColor(character, 'main');
+    const ringMat = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 40), ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    group.add(ring);
+    if (mode === 'counter_stance') {
+        // Khiên bán trong suốt phía trước — silhouette "thủ thế" dễ đọc trên màn hình nhỏ.
+        const shieldMat = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false });
+        const shield = new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.25, 1.6, 24, 1, true, -Math.PI / 3, Math.PI * 2 / 3), shieldMat);
+        shield.position.y = 0.8;
+        shield.rotation.y = Math.PI; // mặt trước nhân vật (+Z cục bộ)
+        group.add(shield);
+        ring.scale.setScalar(1.25);
+    } else {
+        ring.scale.setScalar(0.4);
+    }
+    group.position.copy(window.groundPointUnder ? window.groundPointUnder(player.position) : player.position);
+    scene.add(group);
+    return group;
+}
+
+function disposeHeldSkillVisual() {
+    if (!heldSkill.visual) return;
+    scene.remove(heldSkill.visual);
+    heldSkill.visual.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+    heldSkill.visual = null;
+}
+
+function beginHeldSkill(character, skillData) {
+    if (heldSkill.active || !character || !skillData) return false;
+    heldSkill.active = true;
+    heldSkill.mode = skillData.behavior;
+    heldSkill.character = character;
+    heldSkill.skillData = skillData;
+    heldSkill.elapsed = 0;
+    heldSkill.resolved = false;
+    heldSkill.chargeFullFxDone = false;
+    heldSkill.visual = buildHeldSkillVisual(heldSkill.mode, character);
+    if (heldSkill.mode === 'counter_stance') {
+        // Tư thế thủ: trọng kiếm dựng ngang trước ngực (chỉ hình ảnh — không có damage ở đây).
+        if (player.sword) player.sword.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+        player.mesh.scale.set(1.08, 0.94, 1.08);
+        sfx.playSwing();
+        logHeldSkill('stance_entered', { id: character.id });
+    } else {
+        logHeldSkill('charge_started', { id: character.id });
+    }
+    return true;
+}
+window.beginHeldSkill = beginHeldSkill;
+
+function endHeldSkill() {
+    disposeHeldSkillVisual();
+    if (heldSkill.mode === 'counter_stance' && typeof getWeaponGripRotation === 'function' && player.sword && player.tiltRoot) {
+        const grip = getWeaponGripRotation();
+        player.sword.rotation.set(grip.x + player.tiltRoot.rotation.x, grip.y, grip.z);
+    }
+    heldSkill.active = false;
+    heldSkill.mode = null;
+    heldSkill.character = null;
+    heldSkill.skillData = null;
+    heldSkill.elapsed = 0;
+    heldSkill.resolved = false;
+}
+
+function updateHeldSkill(dt) {
+    if (!heldSkill.active) return;
+    if (player.isDead) { cancelHeldSkill('dead'); return; }
+    const active = getActiveCharacterData();
+    if (!active || active.id !== heldSkill.character.id) { cancelHeldSkill('switch'); return; }
+    heldSkill.elapsed += dt;
+    const cfg = heldSkill.skillData.held || {};
+    if (heldSkill.visual) {
+        heldSkill.visual.position.copy(window.groundPointUnder ? window.groundPointUnder(player.position) : player.position);
+        heldSkill.visual.rotation.y = player.mesh.rotation.y;
+        const ring = heldSkill.visual.children[0];
+        if (heldSkill.mode === 'counter_stance') {
+            // Cửa sổ Perfect: vòng sáng rõ + đập nhịp; sau đó mờ dần -> người chơi đọc được thời điểm vàng.
+            const c = heldSkill.skillData.counter;
+            const inPerfect = heldSkill.elapsed >= c.startup && heldSkill.elapsed <= c.startup + c.perfectWindow;
+            ring.material.opacity = inPerfect ? 0.85 : 0.4;
+            ring.material.color.setHex(inPerfect ? kitVfxColor(heldSkill.character, 'light') : kitVfxColor(heldSkill.character, 'main'));
+            const s = 1.25 + (inPerfect ? Math.sin(heldSkill.elapsed * 30) * 0.05 : 0);
+            ring.scale.setScalar(s);
+        } else {
+            const ratio = getVioletArcChargeRatio();
+            const r = 0.4 + (heldSkill.skillData.arc.holdRadius - 0.4) * ratio;
+            ring.scale.setScalar(Math.max(0.4, r));
+            ring.material.opacity = 0.35 + 0.45 * ratio;
+            if (ratio >= 1 && !heldSkill.chargeFullFxDone) {
+                heldSkill.chargeFullFxDone = true;
+                if (window.spawnGroundRing) window.spawnGroundRing(window.groundPointUnder(player.position), heldSkill.skillData.arc.holdRadius, kitVfxColor(heldSkill.character, 'core'), { life: 0.25, startRatio: 0.9, opacity: 0.9 });
+            }
+        }
+    }
+    if (heldSkill.elapsed >= (cfg.maxHold || 1.5)) releaseHeldSkill('expire');
+}
+
+function releaseHeldSkill(reason) {
+    if (!heldSkill.active || heldSkill.resolved) return;
+    heldSkill.resolved = true;
+    if (heldSkill.mode === 'counter_stance') performCounterRelease(reason);
+    else performVioletArc(reason);
+    endHeldSkill();
+}
+window.releaseHeldSkill = releaseHeldSkill;
+
+function cancelHeldSkill(reason) {
+    if (!heldSkill.active) return;
+    logHeldSkill(heldSkill.mode === 'counter_stance' ? 'stance_interrupted' : 'charge_interrupted', { reason: reason });
+    endHeldSkill();
+}
+window.cancelHeldSkill = cancelHeldSkill;
+
+// Đánh 1 vùng tròn quanh `center` — 1 damage event/enemy/lần gọi (hitKeys chặn trùng). Dùng pipeline
+// chung: getTalentScaling/Impact -> calculatePlayerToEnemyDamage -> enemy.takeDamage(withDamageSource).
+function strikeCircle(character, center, radius, category, opts) {
+    opts = opts || {};
+    const scaling = getTalentScaling(character, category);
+    if (typeof opts.damageMult === 'number') scaling.multiplier *= opts.damageMult;
+    const impact = opts.impact || getTalentImpact(character, category);
+    const vfxEl = getCharacterVfxElement(character);
+    const hitKeys = opts.hitKeys || new Set();
+    const hitEnemies = [];
+    enemies.forEach(enemy => {
+        if (!enemy.alive || hitKeys.has(enemy.id)) return;
+        if (opts.onlyTarget && enemy !== opts.onlyTarget) return;
+        const res = resolveMeleeHitCollision(enemy, center, opts.forward || new THREE.Vector3(0, 0, 1), { hitShape: 'circle', hitRadius: radius + (enemy.isLarge ? 0.6 : 0) });
+        if (!res.hit && enemy !== opts.onlyTarget) return;
+        const dir = res.toEnemy && res.toEnemy.lengthSq() > 0 ? res.toEnemy.clone() : new THREE.Vector3(0, 0, 1);
+        hitKeys.add(enemy.id);
+        const dmg = calculatePlayerToEnemyDamage(character, scaling, enemy);
+        enemy.takeDamage(dmg, dir, false, withDamageSource(impact, character));
+        hitEnemies.push(enemy);
+        if (window.spawnHitImpact) window.spawnHitImpact(enemy.position.clone().addScaledVector(dir, -0.4), dir, { element: vfxEl, weight: window.impactWeight ? window.impactWeight(impact) : 1 });
+        if (!enemy.alive) spawnDeathParticles(enemy.position);
+    });
+    if (hitEnemies.length) {
+        sfx.playHit();
+        hitstopTimer = (typeof opts.hitstop === 'number') ? opts.hitstop : COMBAT_FEEL_CONFIG.hitStopDuration;
+        cameraState.shakeTimer = COMBAT_FEEL_CONFIG.cameraShake.duration * 1.5;
+        cameraState.shakeIntensity = (typeof opts.shake === 'number') ? opts.shake : COMBAT_FEEL_CONFIG.cameraShake.intensity;
+    }
+    return hitEnemies;
+}
+window.strikeCircle = strikeCircle;
+
+function generateKitParticles(hitEnemies, energyCfg) {
+    if (!hitEnemies.length || !energyCfg || !energyCfg.particles || !window.EnergySystem) return;
+    window.EnergySystem.generateParticles(hitEnemies[0].position.clone(), energyCfg.particles, energyCfg.element || null);
+}
+
+function kitLabel(text, style) {
+    if (!window.spawnDamageNumber) return;
+    const p = player.position.clone(); p.y += player.height * 1.05;
+    window.spawnDamageNumber(p, text, style);
+}
+
+// --- Character #5: Counter ---
+// INCOMING ATTACK CONTRACT (enemies.js gọi): trả true = đòn bị chặn hoàn toàn.
+window.interceptIncomingAttack = function (attacker, info) {
+    if (!heldSkill.active || heldSkill.mode !== 'counter_stance' || heldSkill.resolved) return false;
+    if (!info || info.unblockable) { logHeldSkill('ineligible_attack', { reason: info ? 'unblockable' : 'no_info' }); return false; }
+    const active = getActiveCharacterData();
+    if (!active || active.id !== heldSkill.character.id) return false;
+    const c = heldSkill.skillData.counter;
+    if (heldSkill.elapsed < c.startup) { logHeldSkill('too_early', { elapsed: heldSkill.elapsed }); return false; }
+    const perfect = heldSkill.elapsed <= c.startup + c.perfectWindow;
+    heldSkill.resolved = true;
+    performCounter(perfect, attacker, info);
+    endHeldSkill();
+    return true;
+};
+
+function performCounter(perfect, attacker, info) {
+    const character = heldSkill.character;
+    const c = heldSkill.skillData.counter;
+    const variant = perfect ? c.perfect : c.normal;
+    // Chặn đòn: không trừ HP (enemies.js bỏ qua), thêm bất tử ngắn để đòn trùng khung khác không xuyên qua.
+    player.invulnTimer = Math.max(player.invulnTimer, c.postCounterInvuln);
+    const forward = new THREE.Vector3().subVectors(attacker.position, player.position); forward.y = 0;
+    if (forward.lengthSq() > 0.0001) { forward.normalize(); player.mesh.rotation.y = Math.atan2(forward.x, forward.z); }
+    const hits = strikeCircle(character, player.position, variant.radius, perfect ? 'talent:skill.counterPerfect' : 'talent:skill.counterNormal',
+        { forward: forward, hitstop: variant.hitstop, shake: variant.shake });
+    generateKitParticles(hits, perfect ? c.perfect.energyGeneration : c.normal.energyGeneration);
+    startSkillCooldown();
+    // Phản hồi: vòng va chạm + nhãn chữ; Perfect = vòng kép vàng sáng + nhãn PERFECT lớn.
+    if (window.spawnGroundRing) {
+        const gp = window.groundPointUnder(player.position);
+        window.spawnGroundRing(gp, variant.radius, kitVfxColor(character, perfect ? 'light' : 'main'), { life: 0.35, startRatio: 0.3, thickness: 0.14 });
+        if (perfect) window.spawnGroundRing(gp, variant.radius * 1.25, 0xfde047, { life: 0.5, startRatio: 0.5, thickness: 0.08 });
+    }
+    player.mesh.scale.set(0.82, 1.2, 0.82);
+    kitLabel(perfect ? 'PERFECT' : 'COUNTER', perfect ? 'perfect' : 'counter');
+    logHeldSkill(perfect ? 'counter_perfect' : 'counter_normal', { attackId: info.attackId, hits: hits.length, elapsed: heldSkill.elapsed });
+}
+
+function performCounterRelease(reason) {
+    const character = heldSkill.character;
+    const r = heldSkill.skillData.release;
+    const forward = new THREE.Vector3(Math.sin(player.mesh.rotation.y), 0, Math.cos(player.mesh.rotation.y));
+    const center = player.position.clone().addScaledVector(forward, r.forwardOffset || 0);
+    const hits = strikeCircle(character, center, r.radius, 'talent:skill.release', { forward: forward, hitstop: r.hitstop, shake: r.shake });
+    generateKitParticles(hits, r.energyGeneration);
+    startSkillCooldown();
+    if (window.spawnGroundRing) window.spawnGroundRing(window.groundPointUnder(center), r.radius, kitVfxColor(character, 'main'), { life: 0.3, thickness: 0.1 });
+    player.mesh.scale.set(0.85, 1.15, 0.85);
+    sfx.playSwing();
+    logHeldSkill(reason === 'expire' ? 'stance_expired_swing' : 'release_swing', { hits: hits.length, elapsed: heldSkill.elapsed });
+}
+
+// --- Character #6: Violet Arc ---
+function getVioletArcChargeRatio() {
+    if (!heldSkill.active || heldSkill.mode !== 'violet_arc') return 0;
+    const cfg = heldSkill.skillData.held;
+    return Math.max(0, Math.min(1, (heldSkill.elapsed - cfg.tapThreshold) / Math.max(0.01, cfg.maxHold - cfg.tapThreshold)));
+}
+window.getVioletArcChargeRatio = getVioletArcChargeRatio;
+
+function performVioletArc(reason) {
+    const character = heldSkill.character;
+    const sd = heldSkill.skillData;
+    const arc = sd.arc;
+    const isTap = heldSkill.elapsed < sd.held.tapThreshold && reason !== 'expire';
+    const color = kitVfxColor(character, 'main');
+    if (isTap) {
+        // Tap: đánh THẲNG mục tiêu gần nhất trong tapRange (không cần ngắm); không có -> vùng nhỏ phía trước.
+        const target = (typeof TargetAssist !== 'undefined') ? TargetAssist.getNearestTarget(player.position, { maxRange: arc.tapRange }) : null;
+        let hits;
+        if (target) {
+            const d = new THREE.Vector3().subVectors(target.position, player.position); d.y = 0;
+            if (d.lengthSq() > 0.0001) player.mesh.rotation.y = Math.atan2(d.x, d.z);
+            hits = strikeCircle(character, target.position, 0, 'talent:skill.arcTap', { onlyTarget: target });
+            if (window.spawnElectroStrike) window.spawnElectroStrike(target.position, { color: color });
+        } else {
+            const fwd = new THREE.Vector3(Math.sin(player.mesh.rotation.y), 0, Math.cos(player.mesh.rotation.y));
+            const pt = player.position.clone().addScaledVector(fwd, arc.tapFallbackDistance);
+            hits = strikeCircle(character, pt, arc.tapFallbackRadius, 'talent:skill.arcTap', { forward: fwd });
+            if (window.spawnElectroStrike) window.spawnElectroStrike(pt, { color: color });
+            if (window.spawnGroundRing) window.spawnGroundRing(window.groundPointUnder(pt), arc.tapFallbackRadius, color, { life: 0.3 });
+        }
+        generateKitParticles(hits, arc.tapEnergyGeneration);
+        startSkillCooldown(arc.tapCooldown);
+        logHeldSkill('arc_tap', { hits: hits.length, target: !!target });
+    } else {
+        const ratio = getVioletArcChargeRatio();
+        const full = ratio >= 1;
+        const hits = strikeCircle(character, player.position, arc.holdRadius, 'talent:skill.arcHold', {
+            damageMult: arc.holdMinDamageRatio + (1 - arc.holdMinDamageRatio) * ratio,
+            impact: { type: full ? 'heavy' : 'medium' }, hitstop: full ? 0.09 : 0.06, shake: full ? 0.4 : 0.25
+        });
+        hits.forEach(e => { if (window.spawnElectroStrike) window.spawnElectroStrike(e.position, { color: color, big: full }); });
+        if (window.spawnGroundRing) window.spawnGroundRing(window.groundPointUnder(player.position), arc.holdRadius, color, { life: 0.4, startRatio: 0.2, thickness: 0.12 });
+        generateKitParticles(hits, full ? arc.holdFullEnergyGeneration : arc.holdEnergyGeneration);
+        startSkillCooldown(arc.holdCooldown);
+        logHeldSkill('arc_hold', { hits: hits.length, ratio: ratio, full: full, reason: reason });
+    }
+    sfx.playBurst();
+}
+
+// --- Bộ đếm dùng chung cho kit #5/#6 (gọi 1 lần/frame từ updateActiveEffects) ---
+function updateCharacterKitTimers(dt) {
+    if (player.castLockTimer > 0) player.castLockTimer = Math.max(0, player.castLockTimer - dt);
+    updateHeldSkill(dt);
+}
+
+// --- Character #5 Burst: Ground Slam (behavior 'ground_slam') ---
+// Tâm CỐ ĐỊNH tại vị trí cast. Lịch strikes[] rời rạc (time, radius, damageMult, impact) — mỗi strike là
+// 1 damage event/enemy (hit key "s<i>:<id>"). startup khoá di chuyển ngắn (castLockTimer) + bất tử ngắn.
+function runGroundSlamEffect(slot, character, burstData) {
+    const cfg = burstData.slam;
+    player.energy = 0;
+    player.castLockTimer = cfg.startup;
+    player.invulnTimer = Math.max(player.invulnTimer, cfg.invuln);
+    const center = window.groundPointUnder ? window.groundPointUnder(player.position) : player.position.clone();
+    const group = new THREE.Group();
+    const tele = new THREE.Mesh(new THREE.RingGeometry(0.93, 1, 48), new THREE.MeshBasicMaterial({ color: kitVfxColor(character, 'main'), transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false }));
+    tele.rotation.x = -Math.PI / 2;
+    tele.scale.setScalar(cfg.strikes[0].radius);
+    group.add(tele);
+    group.position.set(center.x, center.y + 0.07, center.z);
+    scene.add(group);
+    player.mesh.scale.set(1.2, 0.8, 1.2); // lấy đà
+    if (player.sword) player.sword.rotation.set(-Math.PI / 2.2, 0, 0); // giơ trọng kiếm lên cao
+    sfx.playSwing();
+    player.activeEffects[slot].push({
+        type: 'ground_slam', mesh: group, skillData: burstData,
+        custom: { elapsed: 0, character: character, center: center.clone(), done: cfg.strikes.map(() => false), hitKeys: cfg.strikes.map(() => new Set()) }
+    });
+}
+
+function updateGroundSlamEffect(fx, dt) {
+    const c = fx.custom;
+    const cfg = fx.skillData.slam;
+    c.elapsed += dt;
+    for (let i = 0; i < cfg.strikes.length; i++) {
+        const s = cfg.strikes[i];
+        if (c.done[i] || c.elapsed < s.time) continue;
+        c.done[i] = true;
+        strikeCircle(c.character, c.center, s.radius, 'burst', { damageMult: s.damageMult, impact: s.impact, hitKeys: c.hitKeys[i], hitstop: s.hitstop, shake: s.shake });
+        if (window.spawnGroundRing) window.spawnGroundRing(c.center, s.radius, i === 0 ? 0xfde68a : kitVfxColor(c.character, 'main'), { life: 0.45, startRatio: 0.15, thickness: 0.16 });
+        if (window.spawnDustPuff) for (let k = 0; k < 6; k++) {
+            const a = (k / 6) * Math.PI * 2;
+            window.spawnDustPuff(new THREE.Vector3(c.center.x + Math.cos(a) * s.radius * 0.6, c.center.y + 0.1, c.center.z + Math.sin(a) * s.radius * 0.6));
+        }
+        if (i === 0) player.mesh.scale.set(0.8, 1.2, 0.8);
+    }
+    if (fx.mesh && fx.mesh.children[0]) fx.mesh.children[0].material.opacity = Math.max(0, 0.45 * (1 - c.elapsed / cfg.duration));
+    if (c.elapsed >= cfg.duration) { cleanupEffect(fx); return true; }
+    return false;
+}
+
+// --- Character #6 Burst: Lightning Rose (behavior 'rose_field') ---
+// Vùng CỐ ĐỊNH tại vị trí cast (không đi theo/không homing). Tick rời rạc: tick k tại firstTick + k*interval
+// (k < maxTicks, trong duration). Mỗi tick đánh mỗi enemy trong bán kính tối đa 1 lần (key "k:id").
+// Tồn tại độc lập với nhân vật ra sân (giống field #4); hết duration -> dọn mesh, không tick nữa.
+function runRoseFieldEffect(slot, character, burstData) {
+    const cfg = burstData.field;
+    player.energy = 0;
+    const center = window.groundPointUnder ? window.groundPointUnder(player.position) : player.position.clone();
+    const color = kitVfxColor(character, 'main');
+    const group = new THREE.Group();
+    const boundary = new THREE.Mesh(new THREE.RingGeometry(0.95, 1, 64), new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
+    boundary.rotation.x = -Math.PI / 2;
+    boundary.scale.setScalar(cfg.radius);
+    boundary.position.y = 0.06;
+    group.add(boundary);
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 10), new THREE.MeshBasicMaterial({ color: kitVfxColor(character, 'light'), transparent: true, opacity: 0.9 }));
+    orb.position.y = 1.4;
+    group.add(orb);
+    group.position.copy(center);
+    scene.add(group);
+    if (window.spawnGroundRing) window.spawnGroundRing(center, cfg.radius, kitVfxColor(character, 'core'), { life: 0.4, startRatio: 0.2 });
+    sfx.playBurst();
+    player.activeEffects[slot].push({
+        type: 'rose_field', mesh: group, skillData: burstData,
+        custom: { elapsed: 0, duration: cfg.duration, character: character, center: center.clone(), ticksDone: 0, tickHits: new Set(), orb: orb, boundary: boundary }
+    });
+}
+
+function updateRoseFieldEffect(fx, dt) {
+    const c = fx.custom;
+    const cfg = fx.skillData.field;
+    c.elapsed += dt;
+    while (c.ticksDone < cfg.maxTicks && c.elapsed >= cfg.firstTick + c.ticksDone * cfg.tickInterval && c.elapsed <= c.duration) {
+        const k = c.ticksDone++;
+        const color = kitVfxColor(c.character, 'main');
+        const orbWorld = c.orb.getWorldPosition(new THREE.Vector3());
+        const scaling = getTalentScaling(c.character, 'burst');
+        const impact = cfg.tickImpact || { type: 'light' };
+        let hitCount = 0;
+        enemies.forEach(enemy => {
+            if (!enemy.alive) return;
+            const key = k + ':' + enemy.id;
+            if (c.tickHits.has(key)) return;
+            const dx = enemy.position.x - c.center.x, dz = enemy.position.z - c.center.z;
+            if (dx * dx + dz * dz > cfg.radius * cfg.radius) return;
+            c.tickHits.add(key);
+            const dir = new THREE.Vector3(dx, 0, dz); if (dir.lengthSq() > 0.0001) dir.normalize(); else dir.set(0, 0, 1);
+            enemy.takeDamage(calculatePlayerToEnemyDamage(c.character, scaling, enemy), dir, false, withDamageSource(impact, c.character));
+            hitCount++;
+            if (window.spawnElectroStrike) window.spawnElectroStrike(enemy.position, { color: color });
+            if (!enemy.alive) spawnDeathParticles(enemy.position);
+        });
+        if (hitCount && window.spawnDot) window.spawnDot(orbWorld, { color: kitVfxColor(c.character, 'light'), life: 0.3, size: 2.2, endSize: 0.5, opacity: 0.8 });
+        c.lastTickHits = hitCount;
+    }
+    const left = c.duration - c.elapsed;
+    if (c.orb) { c.orb.position.y = 1.4 + Math.sin(c.elapsed * 3) * 0.12; c.orb.material.opacity = left < 1 ? Math.max(0, left) * 0.9 : 0.9; }
+    if (c.boundary) c.boundary.material.opacity = left < 1 ? Math.max(0, left) * 0.6 : 0.6;
+    if (c.elapsed >= c.duration) { cleanupEffect(fx); return true; }
+    return false;
+}

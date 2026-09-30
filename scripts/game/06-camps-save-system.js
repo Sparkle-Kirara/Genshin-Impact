@@ -94,8 +94,12 @@
             //   Settings:  CHƯA có hệ thống Settings thực tế nào tồn tại (âm lượng/đồ họa/điều khiển) ở
             //              Pre-Alpha này — chừa sẵn key rỗng {} trong save data (mục 2 "chuẩn bị cho
             //              tương lai") để không phải đổi cấu trúc save data khi Settings ra đời sau này.
+            // Alpha M5 (Save v2): TÊN KHOÁ giữ nguyên — '..._v1' chỉ là tên ô lưu có từ trước (quy ước sẵn có của dự án);
+            // phiên bản SCHEMA nằm ở field `version` bên trong dữ liệu. Save v1 được nâng cấp (migrate) lên v2 lúc đọc và
+            // được ghi lại thành v2 ở lần lưu kế tiếp (bản v1 gốc được sao lưu 1 lần vào SAVE_KEY + '_v1_backup').
             const SAVE_KEY = 'genshinFanGame_saveData_v1';
-            const SAVE_SCHEMA_VERSION = 1; // Tăng khi cấu trúc save data đổi không tương thích ngược
+            const SAVE_SCHEMA_VERSION = 2; // Tăng khi cấu trúc save data đổi không tương thích ngược
+            const SAVE_OLDEST_SUPPORTED_VERSION = 1;
 
             // Cờ chặn auto-save trong lúc đang reset — nếu không có cờ này, resetSaveData() xoá xong
             // localStorage rồi gọi reload(), nhưng reload() kích hoạt sự kiện 'beforeunload' NGAY SAU
@@ -112,30 +116,71 @@
                 return {
                     version: SAVE_SCHEMA_VERSION,
                     savedAt: Date.now(),
+                    // Alpha M5 — thông tin schema (không phải tiến trình): migratedFrom = 1 nếu phiên chơi này bắt đầu từ save v1.
+                    meta: { schema: SAVE_SCHEMA_VERSION, migratedFrom: saveRuntime.migratedFrom },
                     player: {
                         position: { x: player.position.x, y: player.position.y, z: player.position.z },
                         rotationY: player.mesh ? player.mesh.rotation.y : 0,
-                        hp: player.hp,
-                        exp: player.exp || 0,
-                        // --- Character (Pre-Alpha v0.8) — level + stats hiện tại (đã cộng dồn qua
-                        // checkLevelUp(), xem 02-collision-and-stats-core.js). Lưu maxHp/atk/def (không
-                        // chỉ level/exp) vì statGrowth CỘNG DỒN vào player.stats trực tiếp — không có
-                        // công thức "tính lại từ level" độc lập, nên đây là NGUỒN SỰ THẬT DUY NHẤT cần
-                        // lưu để khôi phục đúng chỉ số sau khi tải lại (spec mục 6: "giữ nguyên tiến
-                        // trình"). Chỉ lưu 3 field cần thiết (đúng yêu cầu "giảm dung lượng"), KHÔNG lưu
-                        // cả object stats (có thể có field khác không cần persist trong tương lai).
-                        level: player.level || 1,
-                        maxHp: player.maxHp,
-                        atk: player.stats.atk,
-                        def: player.stats.def,
                         primogem: player.primogem || 0,
                         // --- Tên nhân vật (Pre-Alpha v0.8 — UI adjustment) — nhập lần đầu qua Character
                         // Name Popup trong Opening/Title Screen (scripts/opening.js) hoặc giữ mặc định
                         // 'Traveler' nếu người chơi bấm Hủy. Lưu ở đây để applySaveData() khôi phục
                         // đúng tên đã chọn, tránh hiện lại popup nhập tên mỗi lần tải game (chỉ hiện
                         // đúng 1 lần lúc chưa có save — xem runBackgroundStage() trong opening.js).
-                        characterName: window.CHARACTER_DATA ? window.CHARACTER_DATA.name : 'Traveler'
+                        // Alpha M1 (BUG-01): key giữ nguyên 'characterName' (save schema v1) nhưng nội dung là
+                        // TÊN NGƯỜI CHƠI (player.playerName) — trước M1 ghi CHARACTER_DATA.name, tức tên nhân
+                        // vật đang active lúc lưu (sai sau lần đổi nhân vật đầu tiên).
+                        characterName: player.playerName || 'Traveler'
                     },
+                    // Party System Save Fix v1 — BUG FIX QUAN TRỌNG: TRƯỚC ĐÂY (Pre-Alpha v0.8, trước
+                    // khi Party System đa nhân vật ra đời) save data chỉ lưu 1 BỘ level/maxHp/atk/def/hp
+                    // DUY NHẤT dưới player.* — đại diện cho BẤT KỲ nhân vật nào đang active LÚC BẤM
+                    // SAVE, không phân biệt theo từng thành viên. Khi load lại, applySaveData() luôn
+                    // ghi bộ số đó vào partyState[0] (Traveler, vì initParty() luôn khởi động lại ở
+                    // activeCharacterIndex=0) — BUG ĐÃ XÁC NHẬN: save lúc đang cầm Character #2 rồi
+                    // chuyển về #1 trước khi thoát, Traveler vẫn bị ghi ĐÈ nhầm bằng atk/def của #2 sau
+                    // khi load lại (đã kiểm chứng qua sát thương gây ra sai). Từ v1: lưu ĐẦY ĐỦ mảng
+                    // party (mọi thành viên, không chỉ người active) + activeCharacterIndex riêng biệt
+                    // — mỗi nhân vật giữ ĐÚNG level/exp/stats(hp/maxHp/atk/def)/energy của chính họ,
+                    // không lẫn nhau dù có switch qua lại bao nhiêu lần trước khi save.
+                    //
+                    // KHÔNG lưu: name/element/region (tĩnh, luôn đọc lại từ CHARACTER_ROSTER qua id —
+                    // tránh save data cũ "đóng băng" data tĩnh nếu roster được cập nhật sau này),
+                    // mesh/tiltRoot/core/leftHand/rightHand/sword/slashWave/gliderGroup (THREE.js
+                    // object runtime, không serialize được — buildCharacterMesh() dựng lại từ đầu lúc
+                    // initParty()), skillCooldownTimer (runtime combat, reset về 0 hợp lý khi load —
+                    // KHÔNG như energy, cooldown giữa các phiên chơi không có ý nghĩa cần bảo toàn),
+                    // maxEnergy (không đổi theo thời gian, luôn CLONE lại từ
+                    // CHARACTER_ROSTER[id].baseStats.maxEnergy lúc initParty() — lưu ra sẽ dư thừa và
+                    // có nguy cơ "đóng băng" giá trị cũ nếu balance sau này đổi maxEnergy của nhân vật).
+                    // Party Foundation (Task 74821): đội hình người chơi chọn (id theo slot, null = trống).
+                    // Chỉ save CÓ field này mới được áp đội hình khi load; save cũ giữ PARTY_CONFIG mặc định.
+                    partySlots: partyState.map(function(member) { return member ? member.id : null; }),
+                    // Tiến trình của nhân vật đã rời party (level/exp/hp/energy) — không mất khi gỡ khỏi đội.
+                    partyBench: (window.Party ? window.Party.getBenchedMembers() : []).map(function(member) {
+                        return {
+                            id: member.id,
+                            weapon: member.weapon, artifacts: member.artifacts, talents: member.talents, constellation: member.constellation,
+                            level: member.level, exp: member.exp,
+                            stats: { maxHp: member.stats.maxHp, hp: member.stats.hp, atk: member.stats.atk, def: member.stats.def },
+                            energy: member.energy
+                        };
+                    }),
+                    party: partyState.map(function(member, idx) {
+                        if (!member) return null; // Slot Reserved, chưa có Character — giữ nguyên null
+                        // Alpha M0.1 — BUGFIX: level/exp của nhân vật ĐANG active sống ở player.level/exp
+                        // (chỉ chép ngược vào member khi switchToCharacter) -> trước đây bị lưu giá trị cũ.
+                        const isActiveMember = idx === activeCharacterIndex;
+                        return {
+                            id: member.id,
+                            weapon: member.weapon, artifacts: member.artifacts, talents: member.talents, constellation: member.constellation,
+                            level: isActiveMember ? player.level : member.level,
+                            exp: isActiveMember ? player.exp : member.exp,
+                            stats: { maxHp: member.stats.maxHp, hp: member.stats.hp, atk: member.stats.atk, def: member.stats.def },
+                            energy: member.energy
+                        };
+                    }),
+                    activeCharacterIndex: activeCharacterIndex,
                     // Map không tự serialize qua JSON.stringify (ra "{}") — chuyển thành mảng cặp
                     // [itemId, quantity] rồi khôi phục ngược lại bằng new Map(...) ở loadGameData().
                     inventory: Array.from(playerInventory.items.entries()),
@@ -163,6 +208,16 @@
                     // campStates: copy nông từng camp — object con (spawnQueue) là mảng phẳng {isLarge},
                     // không có tham chiếu vòng nào, JSON.stringify xử lý đúng khi thực sự ghi xuống.
                     campStates: JSON.parse(JSON.stringify(campStates)),
+                    // Alpha M3 — encounter: CHỈ cờ bền { firstClearClaimed, clears } theo id (thưởng lần đầu không nhận
+                    // lại sau reload). Key TUỲ CHỌN, save schema vẫn v1: save cũ không có key -> mặc định; bản cũ đọc save
+                    // mới thì bỏ qua key lạ. Quái/trạng thái lượt đang đánh KHÔNG lưu (như Enemy, xem đầu module Save).
+                    encounters: window.collectEncounterSaveData ? window.collectEncounterSaveData() : {},
+                    // Alpha M4 — tiến trình thế giới (nguồn sự thật: WorldState, 16-world-state.js): vùng đã khám phá, vật thể đã
+                    // kích hoạt (bia đá đã đọc), rương thế giới đã mở. Chỉ id — không lưu mesh/vị trí.
+                    world: window.WorldState ? window.WorldState.collect() : { discovered: [], activated: [], opened: [] },
+                    // Alpha M6 — nhiệm vụ chính (nguồn sự thật: StoryQuest, 18-story-quest.js): trạng thái + chỉ số mục tiêu +
+                    // cờ đã nhận thưởng. Nhiệm vụ Bảng (lặp lại) vẫn ở activeQuests/questSlots như v1.
+                    story: window.collectStorySaveData ? window.collectStorySaveData() : {},
                     // Settings (mục 2/5 spec: "chuẩn bị cho tương lai") — hiện tại chỉ có Camera
                     // Sensitivity, nhưng cấu trúc object phẳng này cho phép thêm bất kỳ setting nào sau
                     // này (âm lượng, đồ hoạ...) chỉ bằng cách thêm 1 field mới ở đây + field tương ứng
@@ -198,36 +253,133 @@
                 if (!data) return;
 
                 if (data.player) {
-                    if (data.player.position) player.position.set(data.player.position.x, data.player.position.y, data.player.position.z);
+                    // Alpha M0.1 — chỉ áp vị trí hợp lệ (số hữu hạn), tránh NaN/undefined làm hỏng physics.
+                    const sp = data.player.position;
+                    if (sp && isFinite(sp.x) && isFinite(sp.y) && isFinite(sp.z)
+                        && typeof sp.x === 'number' && typeof sp.y === 'number' && typeof sp.z === 'number') {
+                        player.position.set(sp.x, sp.y, sp.z);
+                    }
                     if (player.mesh) {
                         player.mesh.position.copy(player.position); // initThree() đã copy 1 lần TRƯỚC
                         // khi save data được áp — đồng bộ lại đúng vị trí đã khôi phục, tránh mesh hiển
                         // thị sai chỗ dù state vật lý (player.position) đã đúng.
                         if (typeof data.player.rotationY === 'number') player.mesh.rotation.y = data.player.rotationY;
                     }
-                    if (typeof data.player.hp === 'number') player.hp = data.player.hp;
-                    if (typeof data.player.exp === 'number') player.exp = data.player.exp;
-                    // --- Character (Pre-Alpha v0.8) — khôi phục level + stats TRƯỚC KHI dòng hp ở trên
-                    // đã set xong (thứ tự khai báo không quan trọng ở đây vì player.hp là setter độc
-                    // lập, không phụ thuộc maxHp lúc gán — nhưng đặt sau để rõ ràng: đây là state MỚI
-                    // hơn v0.6, khôi phục theo đúng nhóm field liên quan tới Character). Nếu file save
-                    // cũ (trước v0.8) không có các field này, giữ nguyên giá trị mặc định Level 1 /
-                    // stats gốc mà initThree() đã khởi tạo — không có field nào bị NaN/undefined.
-                    if (typeof data.player.level === 'number') player.level = data.player.level;
-                    if (typeof data.player.maxHp === 'number') player.maxHp = data.player.maxHp;
-                    if (typeof data.player.atk === 'number') player.stats.atk = data.player.atk;
-                    if (typeof data.player.def === 'number') player.stats.def = data.player.def;
                     if (typeof data.player.primogem === 'number') player.primogem = data.player.primogem;
                     // --- Tên nhân vật (Pre-Alpha v0.8) — khôi phục qua setCharacterName() (không gán
                     // trực tiếp CHARACTER_DATA.name) để đồng bộ luôn cả Paimon Menu profile card ngay
                     // khi world vừa dựng xong, không cần đợi người chơi mở menu lần đầu mới thấy đúng.
-                    if (typeof data.player.characterName === 'string' && window.setCharacterName) {
-                        window.setCharacterName(data.player.characterName);
+                    // Alpha M1 (BUG-01) — save v1 cũ có thể đã bị lỗi ghi TÊN NHÂN VẬT (tên trong roster, vd
+                    // 'Windstep') thay cho tên người chơi; tên gốc không còn khôi phục được -> dùng tên mặc
+                    // định thay vì biến tên nhân vật thành tên người chơi. Tên không phải chuỗi -> mặc định.
+                    if (window.setCharacterName) {
+                        const savedName = (typeof data.player.characterName === 'string') ? data.player.characterName.trim() : '';
+                        const rosterNames = Object.keys(window.CHARACTER_ROSTER || {}).map(function (id) { return window.CHARACTER_ROSTER[id] && window.CHARACTER_ROSTER[id].name; });
+                        const looksCorrupted = savedName !== '' && savedName !== 'Traveler' && rosterNames.indexOf(savedName) !== -1;
+                        if (looksCorrupted) console.warn('Save System: tên người chơi trong save trùng tên nhân vật "' + savedName + '" (lỗi BUG-01 của bản cũ) — dùng tên mặc định.');
+                        window.setCharacterName(looksCorrupted ? '' : savedName);
                     }
                 }
 
+                // Party System Save Fix v1 — khôi phục ĐÚNG từng thành viên party theo id (KHÔNG còn
+                // ghi đè "bộ số chung" vào bất kỳ ai đang active như bug cũ — xem giải thích đầy đủ ở
+                // collectSaveData()). Chạy SAU initParty() (đã tạo sẵn đủ 4 slot partyState với mesh
+                // build xong, activeCharacterIndex mặc định = 0) — ở đây chỉ GHI ĐÈ đúng field runtime
+                // (level/exp/stats/energy) vào đúng slot theo id, KHÔNG đụng mesh/tiltRoot/core/...
+                //
+                // Tương thích ngược save CŨ (trước v1, chưa có field "party"): nếu data.party không
+                // tồn tại, giữ nguyên toàn bộ partyState như initParty() vừa khởi tạo (Level 1, full
+                // HP, energy 0 cho MỌI nhân vật) — CHẤP NHẬN mất tiến trình cũ của save trước Party
+                // System Save Fix v1 (không có cách khôi phục đúng vì save cũ không phân biệt theo
+                // nhân vật) thay vì cố gán nhầm vào 1 nhân vật cụ thể — an toàn hơn là tiếp tục lẫn số.
+                if (Array.isArray(data.party)) {
+                    // Party Foundation (Task 74821): áp đội hình đã lưu TRƯỚC khi khôi phục chỉ số theo id.
+                    // lenient: id lạ/trùng -> slot trống; không còn ai hợp lệ -> PARTY_CONFIG mặc định.
+                    // Alpha M8 (kiểm tra console): bản lưu ghi lúc xác nhận tên ở Opening có partySlots RỖNG (đội hình chưa
+                    // được dựng) — trước đây mỗi ván mới đều in cảnh báo "đội hình ... không hợp lệ" dù chẳng có gì sai. Mảng
+                    // rỗng = chưa lưu đội hình -> giữ đội hình mặc định, không cảnh báo (kết quả y hệt trước).
+                    if (Array.isArray(data.partySlots) && data.partySlots.some(Boolean) && window.Party) {
+                        const partyResult = window.Party.commit(data.partySlots, { lenient: true, fromLoad: true });
+                        if (partyResult.errors && partyResult.errors.length) {
+                            console.warn('Save System: đội hình đã lưu có mục không hợp lệ, đã chuẩn hoá.', partyResult.errors);
+                        }
+                    }
+                    const savedMembers = data.party.concat(Array.isArray(data.partyBench) ? data.partyBench : []);
+                    savedMembers.forEach(function(savedMember) {
+                        if (!savedMember || !savedMember.id) return;
+                        const member = partyState.find(function(m) { return m && m.id === savedMember.id; })
+                            || (window.Party ? window.Party.getBenchedMember(savedMember.id) : null);
+                        if (!member) return; // Nhân vật trong save không còn tồn tại trong roster hiện tại — bỏ qua an toàn
+                        if (savedMember.weapon !== undefined) member.weapon = savedMember.weapon;
+                        if (Array.isArray(savedMember.artifacts)) member.artifacts = savedMember.artifacts;
+                        if (Array.isArray(savedMember.talents)) member.talents = savedMember.talents;
+                        if (typeof savedMember.constellation === 'number') member.constellation = savedMember.constellation;
+                        if (typeof savedMember.level === 'number') member.level = savedMember.level;
+                        if (typeof savedMember.exp === 'number') member.exp = savedMember.exp;
+                        if (savedMember.stats) {
+                            if (typeof savedMember.stats.maxHp === 'number') member.stats.maxHp = savedMember.stats.maxHp;
+                            if (typeof savedMember.stats.hp === 'number') member.stats.hp = savedMember.stats.hp;
+                            if (typeof savedMember.stats.atk === 'number') member.stats.atk = savedMember.stats.atk;
+                            if (typeof savedMember.stats.def === 'number') member.stats.def = savedMember.stats.def;
+                        }
+                        if (typeof savedMember.energy === 'number') member.energy = savedMember.energy;
+                    });
+
+                    // Khôi phục activeCharacterIndex — GỌI switchToCharacter() thay vì gán biến trực
+                    // tiếp, để player.mesh/stats/tiltRoot/core/... (con trỏ) được đồng bộ đúng CHUẨN
+                    // giống hệt lúc người chơi tự bấm đổi nhân vật trong lúc chơi, không viết logic
+                    // đồng bộ trùng lặp ở đây. Chỉ gọi nếu KHÁC 0 (mặc định initParty() đã để đúng ở
+                    // Traveler/slot 0 rồi — switchToCharacter(0) sẽ tự return false do
+                    // "index === activeCharacterIndex", không cần né riêng).
+                    // Cleanup (gỡ test_character_anemo): vị trí slot trong party đã dịch chuyển (archer
+                    // 2->1, polearm 3->2) — save CŨ lưu activeCharacterIndex theo vị trí cũ. Quy đổi qua
+                    // ID nhân vật (data.party[index].id, luôn đúng) sang vị trí MỚI trong partyState. Nếu
+                    // nhân vật đó không còn trong party (VD save đang cầm nhân vật test đã gỡ) -> giữ
+                    // Traveler (slot 0), không crash.
+                    // Alpha M0.1 — BUGFIX: player.level/exp là "cửa sổ" của nhân vật active (slot hiện tại,
+                    // luôn 0 lúc này). Nạp đúng giá trị vừa khôi phục của slot đó vào player TRƯỚC khi
+                    // switchToCharacter() chép ngược player.level/exp vào slot cũ — nếu không slot 0 bị ghi
+                    // đè bằng Lv.1/0 EXP mặc định.
+                    const currentMember = partyState[activeCharacterIndex];
+                    if (currentMember) {
+                        player.level = currentMember.level;
+                        player.exp = currentMember.exp;
+                    }
+                    let restoreIndex = data.activeCharacterIndex;
+                    const savedActive = (typeof restoreIndex === 'number') ? data.party[restoreIndex] : null;
+                    if (savedActive && savedActive.id) {
+                        restoreIndex = partyState.findIndex(function(m) { return m && m.id === savedActive.id; });
+                    }
+                    // Task 74821: >= 0 (không phải > 0) — sau khi áp đội hình đã lưu, nhân vật active hiện tại có thể KHÔNG ở
+                    // slot 0 nữa; switchToCharacter() tự bỏ qua nếu trùng index hiện tại.
+                    if (typeof restoreIndex === 'number' && restoreIndex >= 0 && window.switchToCharacter) {
+                        window.switchToCharacter(restoreIndex);
+                    }
+                } else if (typeof data.player === 'object' && data.player && typeof data.player.level === 'number') {
+                    // Tương thích ngược save data TRƯỚC v1 (Pre-Alpha v0.8, chỉ có player.level/maxHp/
+                    // atk/def/hp/exp "chung") — áp dụng đúng như hành vi CŨ, ghi vào nhân vật ĐANG
+                    // active tại thời điểm này (luôn là slot 0/Traveler do initParty() vừa khởi tạo) —
+                    // GIỮ NGUYÊN hành vi cũ CHỈ cho trường hợp save thật sự cũ, không phải bug mới.
+                    if (typeof data.player.hp === 'number') player.hp = data.player.hp;
+                    if (typeof data.player.exp === 'number') player.exp = data.player.exp;
+                    if (typeof data.player.level === 'number') player.level = data.player.level;
+                    if (typeof data.player.maxHp === 'number') player.maxHp = data.player.maxHp;
+                    if (typeof data.player.atk === 'number') player.stats.atk = data.player.atk;
+                    if (typeof data.player.def === 'number') player.stats.def = data.player.def;
+                }
+
                 if (Array.isArray(data.inventory)) {
-                    playerInventory.items = new Map(data.inventory);
+                    // Alpha M0.1 — lọc entry hỏng: id phải có trong ITEM_DATABASE, số lượng là số nguyên > 0.
+                    const itemDb = window.ITEM_DATABASE || {};
+                    const cleanEntries = data.inventory.filter(function(entry) {
+                        return Array.isArray(entry) && entry.length >= 2
+                            && typeof entry[0] === 'string' && itemDb[entry[0]]
+                            && typeof entry[1] === 'number' && isFinite(entry[1]) && entry[1] > 0;
+                    }).map(function(entry) { return [entry[0], Math.floor(entry[1])]; });
+                    if (cleanEntries.length !== data.inventory.length) {
+                        console.warn('Save System: bỏ qua', data.inventory.length - cleanEntries.length, 'mục inventory không hợp lệ.');
+                    }
+                    playerInventory.items = new Map(cleanEntries);
                 }
 
                 if (Array.isArray(data.activeQuests)) {
@@ -288,14 +440,21 @@
                         for (let i = enemies.length - 1; i >= 0; i--) {
                             const enemy = enemies[i];
                             if (!enemy.isSlime || enemy.camp !== campId) continue;
-                            scene.remove(enemy.mesh);
-                            if (enemy.bodyMesh) { enemy.bodyMesh.geometry.dispose(); enemy.bodyMesh.material.dispose(); }
-                            if (enemy.hpBarBg) enemy.hpBarBg.material.dispose();
-                            if (enemy.hpBarFill) enemy.hpBarFill.material.dispose();
+                            enemy.dispose(); // Alpha M1 (BUG-12): gỡ khỏi scene + giải phóng đủ tài nguyên (xem Slime.dispose)
                             enemies.splice(i, 1);
                         }
 
                         if (state.phase === 'respawning') {
+                            // Alpha M0.1 — BUGFIX: slime đã hồi sinh DỞ trước khi reload không được lưu, nhưng
+                            // spawnQueue đã lưu chỉ còn phần CHƯA spawn -> camp thiếu quái cả chu kỳ. Vì toàn bộ
+                            // slime của camp vừa bị xoá ở trên, dựng lại hàng đợi ĐẦY ĐỦ theo composition.
+                            const campCfg = CAMP_CONFIGS_BY_ID[campId];
+                            if (campCfg) {
+                                state.spawnQueue = [];
+                                campCfg.composition.forEach(group => {
+                                    for (let k = 0; k < group.count; k++) state.spawnQueue.push({ isLarge: group.isLarge });
+                                });
+                            }
                             // Xoá Chest thuộc camp này (nếu có) — camp đang respawning thì KHÔNG được có
                             // chest hiển thị (chest chỉ xuất hiện lại khi phase quay về 'active', xem
                             // updateCampRespawns()). Chest dùng this.meshGroup (không phải this.mesh như
@@ -321,6 +480,14 @@
                         // xoá Chest này (khác với nhánh 'respawning' ở trên).
                     });
                 }
+
+                // Alpha M3 — cờ thưởng lần đầu của encounter (key tuỳ chọn, kiểm tra kiểu trong restoreEncounterSaveData).
+                if (data.encounters && window.restoreEncounterSaveData) window.restoreEncounterSaveData(data.encounters);
+
+                // Alpha M4/M6 (Save v2) — thế giới trước, nhiệm vụ sau (nhiệm vụ có thể đọc trạng thái thế giới khi hiển thị).
+                // Save v1 đã được migrate nên luôn có 2 phần này (rỗng = chưa có tiến trình).
+                if (window.WorldState) window.WorldState.restore(data.world || {});
+                if (window.restoreStorySaveData) window.restoreStorySaveData(data.story || {});
 
                 // Settings — hiện tại chỉ có Camera Sensitivity (xem collectSaveData). Chuyển ngược từ
                 // dạng % lưu trữ (10-300) về hệ số nhân dùng trực tiếp trong công thức xoay camera
@@ -359,47 +526,363 @@
             }
             window.applySaveData = applySaveData;
 
-            // Đọc save data thô từ localStorage — trả về object đã parse, hoặc null nếu chưa có/lỗi
-            // (JSON hỏng, phiên bản không tương thích...). KHÔNG throw ra ngoài — 1 save data hỏng
-            // không được phép làm crash toàn bộ game, chỉ nên coi như "chưa có dữ liệu" (mục 1 spec:
-            // "Nếu chưa có dữ liệu lưu: Game sẽ tự động bắt đầu một hành trình mới").
-            function loadGameData() {
-                try {
-                    const raw = localStorage.getItem(SAVE_KEY);
-                    if (!raw) return null;
-                    const data = JSON.parse(raw);
-                    if (!data || data.version !== SAVE_SCHEMA_VERSION) {
-                        console.warn('Save System: dữ liệu lưu không đúng phiên bản hoặc rỗng, bỏ qua.');
-                        return null;
-                    }
-                    return data;
-                } catch (e) {
-                    console.warn('Save System: lỗi đọc dữ liệu lưu, bỏ qua và bắt đầu hành trình mới.', e);
-                    return null;
+            // ============================================================
+            // SAVE v2 (Alpha M5) — đọc / nâng cấp / kiểm tra / ghi
+            // ============================================================
+            // SaveSchema: hàm THUẦN (không đụng localStorage, không đụng state game) để test/đọc lại dễ:
+            //   parse(raw)      -> { data } | { issue: 'malformed'|'invalid_structure'|'unsupported_version'|'future_version', version }
+            //   migrate(data)   -> bản v2 (v1 -> v2: thêm meta/world/story rỗng, giữ nguyên MỌI field v1). Tất định: cùng
+            //                      đầu vào -> cùng đầu ra; áp lên v2 thì trả bản sao y nguyên.
+            //   sanitize(data)  -> { data, warnings } — chỉ giữ giá trị hợp lệ (kiểu + khoảng + id có thật), bỏ phần hỏng thay
+            //                      vì tin mù quáng. Không bịa tiến trình: thiếu/hỏng -> giá trị mặc định của game.
+            const SaveSchema = (function () {
+                const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+                const num = (v, min, max) => typeof v === 'number' && isFinite(v) && v >= min && v <= max;
+                const str = (v, max) => typeof v === 'string' && v.length > 0 && v.length <= max;
+                const clone = (v) => JSON.parse(JSON.stringify(v));
+
+                function parse(raw) {
+                    let data;
+                    try { data = JSON.parse(raw); } catch (e) { return { issue: 'malformed' }; }
+                    if (!isObj(data)) return { issue: 'invalid_structure' };
+                    const v = data.version;
+                    if (typeof v !== 'number' || !isFinite(v) || Math.floor(v) !== v) return { issue: 'unsupported_version', version: v };
+                    if (v > SAVE_SCHEMA_VERSION) return { issue: 'future_version', version: v };
+                    if (v < SAVE_OLDEST_SUPPORTED_VERSION) return { issue: 'unsupported_version', version: v };
+                    return { data: data, version: v };
                 }
+
+                function migrate(data) {
+                    const out = clone(data);
+                    if (out.version === 1) {
+                        out.version = 2;
+                        out.meta = { schema: 2, migratedFrom: 1 };
+                        out.world = { discovered: [], activated: [], opened: [] };
+                        out.story = {};
+                    }
+                    return out;
+                }
+
+                function cleanMember(m) {
+                    if (!isObj(m) || !str(m.id, 64)) return null;
+                    const c = { id: m.id };
+                    if (m.weapon === null || typeof m.weapon === 'string' || isObj(m.weapon)) c.weapon = m.weapon;
+                    if (Array.isArray(m.artifacts) && m.artifacts.length <= 50) c.artifacts = m.artifacts;
+                    if (Array.isArray(m.talents) && m.talents.length <= 50) c.talents = m.talents;
+                    if (num(m.constellation, 0, 6)) c.constellation = Math.floor(m.constellation);
+                    if (num(m.level, 1, 90)) c.level = Math.floor(m.level);
+                    if (num(m.exp, 0, 1e9)) c.exp = m.exp;
+                    if (isObj(m.stats)) {
+                        const s = {};
+                        if (num(m.stats.maxHp, 1, 1e7)) s.maxHp = m.stats.maxHp;
+                        if (num(m.stats.hp, 0, 1e7)) s.hp = (s.maxHp !== undefined) ? Math.min(m.stats.hp, s.maxHp) : m.stats.hp;
+                        if (num(m.stats.atk, 0, 1e6)) s.atk = m.stats.atk;
+                        if (num(m.stats.def, 0, 1e6)) s.def = m.stats.def;
+                        c.stats = s;
+                    }
+                    if (num(m.energy, 0, 1000)) c.energy = m.energy;
+                    return c;
+                }
+
+                function cleanReward(r) {
+                    if (!isObj(r) || !str(r.type, 32) || !(window.REWARD_HANDLERS && window.REWARD_HANDLERS[r.type])) return null;
+                    if (!num(r.amount, 0, 1e6)) return null;
+                    const c = { type: r.type, amount: r.amount };
+                    if (r.itemId !== undefined) { if (!str(r.itemId, 64)) return null; c.itemId = r.itemId; }
+                    return c;
+                }
+
+                function cleanBoardQuest(q) {
+                    if (!isObj(q) || !str(q.id, 96)) return null;
+                    if (q.type !== 'kill' && q.type !== 'gather') return null;
+                    if (!str(q.targetType, 64) || !num(q.targetCount, 1, 1e6) || !num(q.currentCount, 0, 1e6)) return null;
+                    if (['active', 'completed', 'turned_in'].indexOf(q.status) === -1) return null;
+                    const targetCount = Math.floor(q.targetCount);
+                    const currentCount = Math.min(Math.floor(q.currentCount), targetCount);
+                    return {
+                        id: q.id,
+                        title: typeof q.title === 'string' ? q.title.slice(0, 160) : '',
+                        description: typeof q.description === 'string' ? q.description.slice(0, 400) : '',
+                        type: q.type, targetType: q.targetType, targetCount: targetCount,
+                        currentCount: currentCount,
+                        // Đủ số lượng mà vẫn 'active' (mâu thuẫn) -> 'completed', đúng như lúc đạt đủ trong khi chơi (onEnemyKilled).
+                        status: (q.status === 'active' && currentCount >= targetCount) ? 'completed' : q.status,
+                        rewards: Array.isArray(q.rewards) ? q.rewards.map(cleanReward).filter(Boolean) : []
+                    };
+                }
+
+                function cleanIdList(list, max) {
+                    if (!Array.isArray(list)) return [];
+                    return list.filter(id => str(id, 64)).slice(0, max);
+                }
+
+                function sanitize(input) {
+                    const w = [];
+                    const d = isObj(input) ? input : {};
+                    const out = {
+                        version: SAVE_SCHEMA_VERSION,
+                        savedAt: num(d.savedAt, 0, 1e15) ? d.savedAt : 0,
+                        meta: { schema: SAVE_SCHEMA_VERSION, migratedFrom: (isObj(d.meta) && d.meta.migratedFrom === 1) ? 1 : null }
+                    };
+                    // --- player
+                    if (isObj(d.player)) {
+                        const p = {}, sp = d.player.position;
+                        if (isObj(sp) && num(sp.x, -50, 50) && num(sp.y, -20, 80) && num(sp.z, -50, 50)) p.position = { x: sp.x, y: sp.y, z: sp.z };
+                        else if (sp !== undefined) w.push('player.position');
+                        if (num(d.player.rotationY, -1e4, 1e4)) p.rotationY = d.player.rotationY;
+                        if (num(d.player.primogem, 0, 1e9)) p.primogem = Math.floor(d.player.primogem);
+                        else if (d.player.primogem !== undefined) w.push('player.primogem');
+                        if (typeof d.player.characterName === 'string') p.characterName = d.player.characterName.slice(0, 40);   // kiểu sai -> bỏ (tên mặc định)
+                        // Save rất cũ (trước Party System): chỉ số chung dưới player.* — giữ khi hợp lệ cho nhánh tương thích ngược.
+                        ['hp', 'exp', 'level', 'maxHp', 'atk', 'def'].forEach(k => { if (num(d.player[k], 0, 1e9)) p[k] = d.player[k]; });
+                        out.player = p;
+                    }
+                    // --- party
+                    if (Array.isArray(d.party)) {
+                        out.party = d.party.slice(0, 4).map(m => m === null ? null : cleanMember(m));
+                        if (out.party.some((m, i) => m === null && d.party[i] !== null)) w.push('party.member');
+                    }
+                    if (Array.isArray(d.partySlots)) out.partySlots = d.partySlots.slice(0, 4).map(id => (id === null || str(id, 64)) ? id : null);
+                    if (Array.isArray(d.partyBench)) out.partyBench = d.partyBench.slice(0, 16).map(cleanMember).filter(Boolean);
+                    if (num(d.activeCharacterIndex, 0, 3)) out.activeCharacterIndex = Math.floor(d.activeCharacterIndex);
+                    // --- inventory (id phải có trong ITEM_DATABASE, số lượng nguyên > 0)
+                    if (Array.isArray(d.inventory)) {
+                        const db = window.ITEM_DATABASE || {};
+                        const seen = new Set();
+                        out.inventory = d.inventory.filter(e => Array.isArray(e) && e.length >= 2 && str(e[0], 64)
+                            && Object.prototype.hasOwnProperty.call(db, e[0]) && num(e[1], 1, 1e6) && !seen.has(e[0]) && seen.add(e[0]))
+                            .map(e => [e[0], Math.floor(e[1])]);
+                        if (out.inventory.length !== d.inventory.length) w.push('inventory');
+                    }
+                    // --- nhiệm vụ Bảng (lặp lại)
+                    if (Array.isArray(d.activeQuests)) {
+                        const ids = new Set();
+                        out.activeQuests = d.activeQuests.map(cleanBoardQuest).filter(q => q && !ids.has(q.id) && ids.add(q.id));
+                        if (out.activeQuests.length !== d.activeQuests.length) w.push('activeQuests');
+                    }
+                    if (isObj(d.questSlots)) {
+                        const slot = (s) => (isObj(s) && str(s.defId, 64) && str(s.instanceId, 96)) ? { defId: s.defId, instanceId: s.instanceId } : null;
+                        out.questSlots = { combat: slot(d.questSlots.combat), gathering: slot(d.questSlots.gathering) };
+                    }
+                    // --- camp (chu kỳ rương/hồi sinh) — chỉ camp có thật, chỉ field hợp lệ
+                    if (isObj(d.campStates)) {
+                        out.campStates = {};
+                        (window.CAMP_CONFIGS || []).forEach(camp => {
+                            const s = d.campStates[camp.id];
+                            if (!isObj(s)) return;
+                            const c = {};
+                            if (s.phase === 'active' || s.phase === 'respawning') c.phase = s.phase;
+                            if (num(s.respawnCountdown, 0, 3600)) c.respawnCountdown = s.respawnCountdown;
+                            if (Array.isArray(s.spawnQueue) && s.spawnQueue.length <= 32) c.spawnQueue = s.spawnQueue.filter(x => isObj(x) && typeof x.isLarge === 'boolean').map(x => ({ isLarge: x.isLarge }));
+                            if (num(s.spawnIntervalTimer, 0, 600)) c.spawnIntervalTimer = s.spawnIntervalTimer;
+                            if (typeof s.cleared === 'boolean') c.cleared = s.cleared;
+                            out.campStates[camp.id] = c;
+                        });
+                    }
+                    // --- encounter M3 / thế giới M4 / nhiệm vụ chính M6: kiểm tra id sâu hơn nằm ở module sở hữu
+                    if (isObj(d.encounters)) out.encounters = d.encounters;
+                    out.world = isObj(d.world)
+                        ? { discovered: cleanIdList(d.world.discovered, 200), activated: cleanIdList(d.world.activated, 200), opened: cleanIdList(d.world.opened, 200) }
+                        : { discovered: [], activated: [], opened: [] };
+                    out.story = isObj(d.story) ? d.story : {};
+                    // --- settings
+                    if (isObj(d.settings)) {
+                        const s = {};
+                        if (num(d.settings.cameraSensitivity, 10, 300)) s.cameraSensitivity = d.settings.cameraSensitivity;
+                        if (typeof d.settings.skipOpening === 'boolean') s.skipOpening = d.settings.skipOpening;
+                        if (typeof d.settings.fullscreenEnabled === 'boolean') s.fullscreenEnabled = d.settings.fullscreenEnabled;
+                        out.settings = s;
+                    }
+                    return { data: out, warnings: w };
+                }
+
+                return { parse: parse, migrate: migrate, sanitize: sanitize };
+            })();
+            window.SaveSchema = SaveSchema;
+
+            // Trạng thái vận hành của Save (không phải dữ liệu lưu): lần đọc/ghi gần nhất, lỗi, có đang chặn ghi hay không.
+            const saveRuntime = {
+                migratedFrom: null,       // 1 nếu phiên chơi này bắt đầu từ save v1 (ghi vào meta của các lần lưu sau)
+                loadIssue: null,          // { code, version, backupKey } khi save hiện có KHÔNG đọc được
+                blocked: false,           // true = save thuộc phiên bản MỚI HƠN -> không ghi đè cho tới khi người chơi chọn
+                lastBody: null, lastJson: null, lastOkAt: 0, writes: 0, skippedUnchanged: 0, lastBytes: 0,
+                failures: 0, failing: false, lastError: null, lastBlockedToastAt: 0,
+                // notice = vấn đề của save có sẵn LÚC PHIÊN CHƠI BẮT ĐẦU, giữ tới khi đã báo cho người chơi (người chơi mới có
+                // thể đã ghi save mới ở popup nhập tên TRƯỚC khi thế giới dựng xong -> loadIssue lúc đó đã về null).
+                reported: false, notice: null, seenRaw: new Set()
+            };
+
+            function saveToast(icon, text) { if (window.showRewardPopup) window.showRewardPopup(icon, text); }
+
+            // Alpha M0.1 — save không đọc được sẽ bị ghi đè sau đó -> giữ 1 bản sao thô để khôi phục/migrate thủ công.
+            // Alpha M5 — chỉ ghi khi nội dung KHÁC bản đang giữ (loadGameData() chạy nhiều lần mỗi lần khởi động).
+            function backupUnreadableSave(raw) {
+                if (!raw) return null;
+                const key = SAVE_KEY + '_unreadable_backup';
+                try { if (localStorage.getItem(key) !== raw) localStorage.setItem(key, raw); } catch (e) { return null; }
+                return key;
+            }
+
+            // Ghi nhận 1 lần/1 nội dung save (loadGameData() được opening.js gọi 3 lần + initThree() 1 lần).
+            function recordLoadIssue(code, raw, version) {
+                const backupKey = raw ? backupUnreadableSave(raw) : null;
+                saveRuntime.loadIssue = { code: code, version: (version === undefined ? null : version), backupKey: backupKey };
+                if (!saveRuntime.reported && !saveRuntime.notice) saveRuntime.notice = saveRuntime.loadIssue;
+                // KHÔNG ghi đè ô lưu khi: save thuộc phiên bản mới hơn, HOẶC save hỏng mà không sao lưu được (bộ nhớ đầy/bị
+                // chặn) — người chơi quyết định qua thông báo (reportLoadIssue). Save hỏng đã sao lưu được: chơi mới bình thường.
+                if (code === 'future_version' || (raw && !backupKey)) saveRuntime.blocked = true;
+                const tag = code + '|' + (raw ? raw.length + ':' + raw.slice(0, 64) : '');
+                if (saveRuntime.seenRaw.has(tag)) return;
+                saveRuntime.seenRaw.add(tag);
+                if (code === 'future_version') {
+                    console.warn('Save System: dữ liệu lưu không đúng phiên bản (v' + version + ' mới hơn v' + SAVE_SCHEMA_VERSION + ') — bỏ qua, giữ nguyên bản gốc và TẠM KHÔNG ghi đè.');
+                } else if (code === 'storage_unavailable') {
+                    console.warn('Save System: lỗi đọc bộ nhớ trình duyệt (localStorage bị chặn) — bỏ qua, chơi không lưu.');
+                } else {
+                    console.warn('Save System: lỗi đọc dữ liệu lưu (' + code + ') — bỏ qua, đã sao lưu bản gốc vào', backupKey, 'và bắt đầu hành trình mới.');
+                }
+            }
+
+            // Đọc save: null khi chưa có / không dùng được (KHÔNG throw — save hỏng không được làm crash game, mục 1 spec gốc).
+            // Được gọi nhiều lần mỗi lần khởi động -> mọi tác dụng phụ (sao lưu, log) đều idempotent.
+            function loadGameData() {
+                let raw = null;
+                try { raw = localStorage.getItem(SAVE_KEY); }
+                catch (e) { recordLoadIssue('storage_unavailable', null); return null; }
+                if (!raw) { saveRuntime.loadIssue = null; return null; }
+                const parsed = SaveSchema.parse(raw);
+                if (parsed.issue) { recordLoadIssue(parsed.issue, raw, parsed.version); return null; }
+                saveRuntime.loadIssue = null;
+                let data = parsed.data;
+                if (data.version < SAVE_SCHEMA_VERSION) {
+                    // Nâng cấp tất định trong bộ nhớ; bản v1 gốc được sao lưu 1 lần (không ghi đè bản sao lưu đã có).
+                    try { if (localStorage.getItem(SAVE_KEY + '_v1_backup') === null) localStorage.setItem(SAVE_KEY + '_v1_backup', raw); } catch (e) { /* chỉ là bản sao lưu phụ */ }
+                    data = SaveSchema.migrate(data);
+                    saveRuntime.migratedFrom = 1;
+                    if (!saveRuntime.seenRaw.has('migrated')) { saveRuntime.seenRaw.add('migrated'); console.info('Save System: đã nâng cấp dữ liệu lưu v1 -> v' + SAVE_SCHEMA_VERSION + ' (bản gốc: ' + SAVE_KEY + '_v1_backup).'); }
+                } else if (data.meta && data.meta.migratedFrom === 1) {
+                    saveRuntime.migratedFrom = 1;
+                }
+                const res = SaveSchema.sanitize(data);
+                if (res.warnings.length && !saveRuntime.seenRaw.has('warn:' + res.warnings.join(','))) {
+                    saveRuntime.seenRaw.add('warn:' + res.warnings.join(','));
+                    console.warn('Save System: bỏ qua dữ liệu lưu không hợp lệ ở', res.warnings.join(', '), '— dùng giá trị mặc định cho phần đó.');
+                }
+                return res.data;
             }
             window.loadGameData = loadGameData;
 
-            // Ghi ngay lập tức xuống localStorage — hàm CẤP THẤP, không debounce/throttle (đó là việc
-            // của requestSave() bên dưới). Gọi trực tiếp hàm này chỉ khi CHẮC CHẮN muốn ghi ngay (VD
-            // saveGameImmediately() khi đóng tab/reset).
-            function saveGameNow() {
-                // Đang trong quá trình reset (đã xoá xong, chờ reload()) — TUYỆT ĐỐI không ghi lại,
-                // dù được gọi từ đâu (requestSave() debounce đang chờ, setInterval định kỳ, hay chính
-                // 'beforeunload' bị kích hoạt bởi window.location.reload() trong resetSaveData()).
-                // Đây là điểm ghi CẤP THẤP NHẤT — mọi đường lưu khác đều đi qua đây, nên chặn ở đây là
-                // đủ để bảo vệ toàn bộ hệ thống, không cần rải cờ kiểm tra ở từng nơi gọi.
-                if (isResettingSave) return;
-                try {
-                    localStorage.setItem(SAVE_KEY, JSON.stringify(collectSaveData()));
-                } catch (e) {
-                    // localStorage đầy hoặc bị chặn (chế độ ẩn danh nghiêm ngặt...) — không throw, chỉ
-                    // cảnh báo. Game vẫn phải chơi được bình thường dù không lưu được (mất tính năng
-                    // "phụ", không phải lỗi chặn toàn bộ trải nghiệm).
-                    console.warn('Save System: không thể ghi dữ liệu lưu.', e);
+            function onSaveFailure(e) {
+                saveRuntime.failures++;
+                saveRuntime.lastError = (e && (e.name || e.message)) || 'unknown';
+                console.warn('Save System: không thể ghi dữ liệu lưu.', e);
+                if (!saveRuntime.failing) {
+                    saveRuntime.failing = true;
+                    saveToast('fa-solid fa-triangle-exclamation text-red-400', 'Không lưu được tiến trình (bộ nhớ trình duyệt đầy hoặc bị chặn)');
                 }
             }
+
+            // Ghi ngay xuống localStorage (cấp thấp, không debounce). Trả { ok, … } — KHÔNG báo thành công khi ghi hỏng.
+            //   - Đang reset / đang chặn (save của phiên bản mới hơn) -> không ghi.
+            //   - Nội dung KHÔNG đổi so với lần ghi trước (bỏ qua savedAt) và ô lưu vẫn đúng bản đó -> bỏ qua (autosave 10 s
+            //     không còn ghi lặp dữ liệu y hệt khi người chơi đứng yên).
+            function saveGameNow() {
+                // Đang trong quá trình reset (đã xoá xong, chờ reload()) — TUYỆT ĐỐI không ghi lại (xem resetSaveData()).
+                if (isResettingSave) return { ok: false, skipped: 'resetting' };
+                if (saveRuntime.blocked) {
+                    const now = Date.now();
+                    if (now - saveRuntime.lastBlockedToastAt > 60000) {
+                        saveRuntime.lastBlockedToastAt = now;
+                        saveToast('fa-solid fa-lock text-amber-300', 'Tiến trình chưa được lưu — đang giữ nguyên dữ liệu lưu không đọc được');
+                    }
+                    return { ok: false, skipped: 'blocked' };
+                }
+                let data;
+                try { data = collectSaveData(); }
+                catch (e) { onSaveFailure(e); return { ok: false, error: 'collect_failed' }; }
+                const body = JSON.stringify(Object.assign({}, data, { savedAt: 0 }));
+                if (body === saveRuntime.lastBody) {
+                    let current = null;
+                    try { current = localStorage.getItem(SAVE_KEY); } catch (e) { current = null; }
+                    if (current !== null && current === saveRuntime.lastJson) { saveRuntime.skippedUnchanged++; return { ok: true, unchanged: true }; }
+                }
+                const json = JSON.stringify(data);
+                try {
+                    localStorage.setItem(SAVE_KEY, json);
+                } catch (e) {
+                    // localStorage đầy hoặc bị chặn — không throw (game vẫn chơi được), nhưng báo rõ cho người chơi 1 lần/chuỗi lỗi.
+                    onSaveFailure(e);
+                    return { ok: false, error: saveRuntime.lastError };
+                }
+                saveRuntime.lastBody = body;
+                saveRuntime.lastJson = json;
+                saveRuntime.lastOkAt = Date.now();
+                saveRuntime.writes++;
+                saveRuntime.lastBytes = json.length;
+                if (saveRuntime.failing) {
+                    saveRuntime.failing = false;
+                    saveToast('fa-solid fa-floppy-disk text-emerald-300', 'Đã lưu lại được tiến trình');
+                }
+                return { ok: true };
+            }
             window.saveGameNow = saveGameNow;
+
+            // Thông báo vấn đề khi đọc save — gọi 1 lần sau applySaveData() (initThree, 04). Đang chặn ghi (phiên bản mới hơn /
+            // hỏng mà không sao lưu được): hỏi người chơi (giữ nguyên + chơi không lưu, hoặc ghi đè bằng hành trình mới).
+            // Save hỏng đã sao lưu bản gốc: chỉ báo.
+            function reportLoadIssue() {
+                const issue = saveRuntime.notice || saveRuntime.loadIssue;
+                if (!issue || saveRuntime.reported) return;
+                saveRuntime.reported = true;
+                if (saveRuntime.blocked) { showLoadIssueNotice(issue); return; }
+                if (issue.code === 'storage_unavailable') { saveToast('fa-solid fa-triangle-exclamation text-red-400', 'Trình duyệt chặn bộ nhớ lưu — tiến trình sẽ không được lưu'); return; }
+                saveToast('fa-solid fa-triangle-exclamation text-amber-300', 'Dữ liệu lưu cũ bị hỏng — đã sao lưu bản gốc, bắt đầu hành trình mới');
+            }
+
+            function showLoadIssueNotice(issue) {
+                if (document.getElementById('save-issue-overlay')) return;
+                const ov = document.createElement('div');
+                ov.id = 'save-issue-overlay';
+                ov.setAttribute('role', 'dialog');
+                ov.style.cssText = 'position:fixed;inset:0;z-index:95;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.7);padding:16px;pointer-events:auto';
+                ov.innerHTML = '<div style="background:rgba(18,16,30,.97);border:1px solid rgba(235,220,185,.4);border-radius:16px;padding:20px;max-width:380px;width:100%;color:#f7e8cf;font-family:inherit;display:flex;flex-direction:column;gap:12px">' +
+                    '<div style="font-size:17px;font-weight:700;color:#fde68a">Không thể đọc dữ liệu lưu</div>' +
+                    '<div style="font-size:13px;line-height:1.5;color:#d6d3d1">' + (issue.code === 'future_version'
+                        ? 'Dữ liệu lưu thuộc phiên bản mới hơn của trò chơi (v' + Number(issue.version) + '). Bản này không đọc được nó. '
+                        : 'Dữ liệu lưu bị hỏng và không sao lưu được (bộ nhớ trình duyệt đầy hoặc bị chặn). ') +
+                    'Bản gốc được <b>giữ nguyên</b> và trò chơi sẽ <b>không ghi đè</b> cho tới khi bạn chọn.</div>' +
+                    '<button id="save-issue-keep" style="padding:10px;border-radius:10px;border:1px solid rgba(156,148,192,.5);background:transparent;color:#d6d3d1;font-size:14px;font-weight:600;cursor:pointer">Chơi tiếp, không lưu</button>' +
+                    '<button id="save-issue-overwrite" style="padding:10px;border-radius:10px;border:0;background:#f59e0b;color:#12101e;font-size:14px;font-weight:700;cursor:pointer">Bắt đầu hành trình mới (ghi đè)</button></div>';
+                document.body.appendChild(ov);
+                const close = () => { if (ov.parentNode) ov.parentNode.removeChild(ov); };
+                ov.querySelector('#save-issue-keep').addEventListener('click', close);
+                ov.querySelector('#save-issue-overwrite').addEventListener('click', () => { close(); allowOverwrite(); });
+            }
+
+            // Người chơi chọn ghi đè: bỏ chặn và lưu ngay (bản gốc vẫn còn trong SAVE_KEY + '_unreadable_backup').
+            function allowOverwrite() {
+                saveRuntime.blocked = false;
+                const r = saveGameNow();
+                if (r.ok) saveToast('fa-solid fa-floppy-disk text-emerald-300', 'Đã bắt đầu lưu hành trình mới');
+                return r;
+            }
+
+            window.SaveSystem = {
+                KEY: SAVE_KEY,
+                VERSION: SAVE_SCHEMA_VERSION,
+                schema: SaveSchema,
+                reportLoadIssue: reportLoadIssue,
+                allowOverwrite: allowOverwrite,
+                getStatus() {
+                    return {
+                        version: SAVE_SCHEMA_VERSION, blocked: saveRuntime.blocked, loadIssue: saveRuntime.loadIssue ? Object.assign({}, saveRuntime.loadIssue) : null,
+                        migratedFrom: saveRuntime.migratedFrom, lastOkAt: saveRuntime.lastOkAt, writes: saveRuntime.writes,
+                        skippedUnchanged: saveRuntime.skippedUnchanged, lastBytes: saveRuntime.lastBytes,
+                        failures: saveRuntime.failures, failing: saveRuntime.failing, lastError: saveRuntime.lastError,
+                        notice: saveRuntime.notice ? Object.assign({}, saveRuntime.notice) : null, noticeShown: saveRuntime.reported
+                    };
+                }
+            };
 
             // --- AUTO SAVE THEO SỰ KIỆN (mục 3 spec) ---
             // Debounce nhẹ (300ms) — nhiều sự kiện có thể bắn dồn dập trong cùng 1 frame/vài frame liên
@@ -661,6 +1144,10 @@
                 player.isGliding = false;
                 deactivateGlider();
 
+                // Alpha M7: huỷ Attack đang giữ / đang charge, Aim (kể cả cờ cung #2 + mũi tên xem trước) và Held Skill #5/#6
+                // — mouseup/touchend bị bỏ qua khi đã gục nên cờ "đang giữ" từng kẹt sang lúc hồi sinh. Cùng đường huỷ như mất
+                // focus / mở Paimon Menu (M1): không ra đòn, không cooldown. Chạy TRƯỚC khối reset phase bên dưới (giữ nguyên).
+                if (window.cancelHeldCombatInput) window.cancelHeldCombatInput('dead');
                 // Hủy Skill Aim State dở dang (nếu có) — vì keyup có thể không chạy tới handleSkillKeyUp()
                 // khi player.isDead vừa được set true (guard sớm ở đầu keyup handler), cần reset tường
                 // minh ở đây để tránh skillAimState bị kẹt mãi mãi ở phase 'holding'/'aiming'.
