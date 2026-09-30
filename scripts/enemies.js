@@ -20,7 +20,9 @@
 //   spawnRunTrail (từ vfx.js, load trước file này)
 //
 // enemies.js EXPORT ra window để game.js/combat.js dùng:
-//   Enemy, Slime
+//   Enemy, Slime, recordDamageEvent (damage event contract),
+//   applyEnemyAttackToPlayer (Alpha M2 — đường duy nhất cho đòn quái trúng người chơi, dùng chung với
+//   quái khung M2 trong game/14-enemy-framework.js)
 // ============================================================
 
             class Enemy {
@@ -120,6 +122,18 @@
                     // sự trừ HP thấp qua field stats.hp theo cách Slime làm, vẫn ghi nhận nhất quán để
                     // không có nhánh nào bị bỏ sót nếu sau này có code khác dùng class Enemy để test).
                     this.lastDamageSource = (impact && impact.source) ? impact.source : null;
+                    // DAMAGE EVENT CONTRACT (xem window.recordDamageEvent bên dưới) — dummy bất tử KHÔNG
+                    // bao giờ giảm HP, nên mọi cơ chế "phát hiện bị trúng đòn" phải đọc damageEventSeq
+                    // chứ không so HP. Nhờ vậy Coordinated Attack/hạt năng lượng hoạt động trên dummy.
+                    window.recordDamageEvent(this, amount, impact);
+
+                    // Hiển thị số sát thương trên dummy (chỉ hiển thị — dummy vẫn bất tử, không trừ HP),
+                    // cùng style với Slime, để test sát thương/hạt năng lượng trên dummy nhìn thấy được.
+                    if (window.spawnDamageNumber) {
+                        const numberOrigin = this.position.clone();
+                        numberOrigin.y += this.height * 0.6;
+                        window.spawnDamageNumber(numberOrigin, Math.max(0, Math.round(amount || 0)), window.getDamageNumberStyle ? window.getDamageNumberStyle(impact) : undefined);
+                    }
 
                     this.flashTimer = 0.18; 
                     this.bodyMesh.material = isHydro ? this.hydroFlashMaterial : this.flashMaterial;
@@ -195,6 +209,62 @@
             }
             window.Enemy = Enemy;
 
+            // ============================================================
+            // DAMAGE EVENT CONTRACT — áp dụng cho MỌI object có thể bị tấn công
+            // ============================================================
+            // Object nào nằm trong window.enemies[] và có takeDamage() (Slime, dummy class Enemy, và mọi
+            // loại object bị tấn công thêm sau này) PHẢI gọi window.recordDamageEvent(this, amount, impact)
+            // ở đầu takeDamage(). Hàm này tăng target.damageEventSeq mỗi lần có 1 damage event THẬT —
+            // bất kể HP có giảm hay không (dummy bất tử, damage 0, đòn kết liễu...). Các cơ chế "phát
+            // hiện bị trúng đòn" (VD Coordinated Attack của Character #3 -> hạt năng lượng) đọc bộ đếm
+            // này thay vì so sánh HP, nên tự động hoạt động trên mọi loại target.
+            // CHỈ ghi nhận sự kiện — không tính damage, không đổi HP, không đổi balance.
+            window.recordDamageEvent = function (target, amount, impact) {
+                if (!target) return;
+                target.damageEventSeq = (target.damageEventSeq || 0) + 1;
+                target.lastDamageAmount = Math.max(0, Math.round(amount || 0));
+            };
+
+            // ============================================================
+            // ENEMY → PLAYER HIT CONTRACT (Alpha M2) — đường DUY NHẤT cho 1 đòn của quái ĐÃ TRÚNG người chơi
+            // ============================================================
+            // Nơi gọi tự quyết định đòn CÓ trúng hay không (tầm, khung tấn công, hitbox riêng của từng loại quái);
+            // hàm này chỉ xử lý phần SAU KHI trúng, đúng thứ tự khối inline cũ trong Slime.update() (TD-03):
+            //   bất tử? → Counter #5 (interceptIncomingAttack) → calculateFinalDamage(ATK quái, DEF người chơi) → trừ HP
+            //   → bất tử 0.8s → chớp đỏ + âm thanh + số damage 'incoming' + rung camera → đẩy lùi + khựng → gục nếu HP = 0.
+            // Slime và quái khung M2 (game/14-enemy-framework.js) cùng gọi hàm này -> không có đường sát thương thứ hai.
+            // opts: { kind, attackId, unblockable, atk, origin, push, stagger, shakeTimer, shakeIntensity } — mọi field
+            // tuỳ chọn, mặc định = đúng giá trị Slime đã dùng. Trả về 'hit' | 'countered' | 'invulnerable' | 'ignored'.
+            window.applyEnemyAttackToPlayer = function (attacker, opts) {
+                const player = window.player;
+                opts = opts || {};
+                if (!player || !attacker || player.isDead) return 'ignored';
+                if (player.invulnTimer > 0) return 'invulnerable';
+                // Character #5 (Claymore) — INCOMING ATTACK CONTRACT: true = đòn bị chặn -> KHÔNG trừ HP/đẩy lùi/số damage.
+                const countered = !!(window.interceptIncomingAttack && window.interceptIncomingAttack(attacker, {
+                    kind: opts.kind || 'melee', attackId: opts.attackId, unblockable: opts.unblockable === true
+                }));
+                if (countered) return 'countered';
+                const atk = (typeof opts.atk === 'number') ? opts.atk : (attacker.stats ? attacker.stats.atk : 0);
+                const dmg = window.calculateFinalDamage(atk, player.stats.def);
+                player.hp = Math.max(0, player.hp - dmg); player.invulnTimer = 0.8;
+                window.triggerDamageFlash(); window.sfx.playHit();
+                if (window.spawnDamageNumber) {
+                    const numberOrigin = player.position.clone();
+                    numberOrigin.y += player.height * 0.75;
+                    window.spawnDamageNumber(numberOrigin, dmg, 'incoming'); // sát thương NHẬN VÀO -> đỏ
+                }
+                window.cameraState.shakeTimer = (typeof opts.shakeTimer === 'number') ? opts.shakeTimer : 0.25;
+                window.cameraState.shakeIntensity = (typeof opts.shakeIntensity === 'number') ? opts.shakeIntensity : 0.35;
+                // Khựng nhẹ: đẩy lùi + staggerTimer ngắn, không khoá input người chơi.
+                const origin = opts.origin || attacker.position;
+                const pushDir = new THREE.Vector3().subVectors(player.position, origin); pushDir.y = 0;
+                if (pushDir.lengthSq() > 0.0001) player.velocity.add(pushDir.normalize().multiplyScalar((typeof opts.push === 'number') ? opts.push : 4.0));
+                player.staggerTimer = (typeof opts.stagger === 'number') ? opts.stagger : 0.1;
+                if (player.hp <= 0) window.enterDeadState('combat');
+                return 'hit';
+            };
+
             // --- SLIME WANDER CONFIG (Pre-Alpha Stabilization) ---
             // Gom range random cho các timer trạng thái lang thang (idle/prep/land) của Slime — trước
             // đây chỉ có Idle stateTimer được random hoá lúc constructor (Math.random() * 2.0), các
@@ -254,6 +324,26 @@
             function enterIdleState(slime) {
                 slime.state = 'idle';
                 slime.stateTimer = randomInRange(SLIME_WANDER_CONFIG.idleDuration);
+            }
+
+            // Alpha M4 (KI-125) — NEO CAMP cho lúc đi lang thang: trước đây wanderAngle chỉ cộng ngẫu nhiên (+-1 rad) mỗi
+            // lần nhảy -> bước đi ngẫu nhiên không có điểm về, sau vài phút slime của camp trôi tới khu cắm trại / bãi thử
+            // thách. Giờ: slime THUỘC 1 camp mà đang ở xa tâm camp hơn spawnRadius + margin thì hướng lang thang quay về tâm
+            // camp. CHỈ ảnh hưởng hành vi rảnh rỗi (idle / nhảy lang thang) — phát hiện, đuổi, tấn công, phản ứng trúng đòn
+            // giữ nguyên. Slime không thuộc camp nào (test, sự kiện) không đổi gì.
+            const SLIME_CAMP_LEASH_MARGIN = 1.5;
+            function campHomeAngle(slime) {
+                if (slime.camp === undefined || slime.camp === null) return null;
+                if (slime._campCfg === undefined) {
+                    const cfgs = window.CAMP_CONFIGS || [];
+                    slime._campCfg = cfgs.find(function (c) { return c.id === slime.camp; }) || null;
+                }
+                const camp = slime._campCfg;
+                if (!camp) return null;
+                const dx = camp.x - slime.position.x, dz = camp.z - slime.position.z;
+                const leash = (camp.spawnRadius || 5) + SLIME_CAMP_LEASH_MARGIN;
+                if (dx * dx + dz * dz <= leash * leash) return null;
+                return Math.atan2(dx, dz);   // cùng quy ước dir = (sin, cos) của wanderAngle
             }
 
             // enterHitReactionState(slime, reaction, direction): Hit Reaction / Poise System v1 —
@@ -349,6 +439,26 @@
                     // jump/attack_jump) — đúng yêu cầu "giữ trạng thái airborne nếu đang ở trên không".
                 }
                 slime.isEngagingPlayer = false;
+            }
+
+            // Alpha M1 (BUG-12): gom geometry/material của 1 cây Object3D (duyệt đệ quy mọi con, hỗ trợ material dạng
+            // mảng) + các material phụ truyền vào. Sprite chỉ lấy material — geometry của THREE.Sprite là 1 geometry
+            // DÙNG CHUNG toàn cục cho mọi sprite (thanh máu, số damage...), dispose nó sẽ hỏng tất cả.
+            function collectOwnedGpuResources(root, extraMaterials) {
+                const owned = new Set();
+                const addMaterial = (m) => {
+                    if (Array.isArray(m)) m.forEach(addMaterial);
+                    else if (m && typeof m.dispose === 'function') owned.add(m);
+                };
+                (extraMaterials || []).forEach(addMaterial);
+                root.traverse(obj => {
+                    if (obj.isSprite) { addMaterial(obj.material); return; }
+                    if (obj.isMesh || obj.isLine || obj.isPoints) {
+                        if (obj.geometry && typeof obj.geometry.dispose === 'function') owned.add(obj.geometry);
+                        addMaterial(obj.material);
+                    }
+                });
+                return Array.from(owned);
             }
 
             class Slime {
@@ -483,6 +593,10 @@
                     this.rightEye = this.leftEye.clone(); this.rightEye.position.x = this.width * 0.18; group.add(this.rightEye);
                     
                     this.mesh = group; this.mesh.position.copy(this.position); window.scene.add(this.mesh);
+                    // Alpha M1 (BUG-04): scale "nghỉ" của group, chụp NGAY lúc tạo — Hydro squash (Skill/Burst/
+                    // Plunge, 09-character-system.js + combat.js) ghi đè this.mesh.scale, update() trả về ĐÚNG
+                    // giá trị này sau khi hết hydroSquashTimer (không hard-code 1.0).
+                    this.restMeshScale = this.mesh.scale.clone();
                     this.aabb = new window.AABB(); this.aabb.updateFromObject(this.mesh, this.width, this.height, this.depth);
 
                     // --- ENEMY HP BAR (Pre-Alpha v0.7 — Core Stats) ---
@@ -518,7 +632,22 @@
                     this.hpBarBg.visible = false;
                     this.hpBarFill.visible = false;
 
+                    // Alpha M1 (BUG-12): chụp ĐÚNG danh sách tài nguyên GPU do constructor này tạo (geometry thân +
+                    // mắt, 3 material thân kể cả 2 cái không gắn sẵn, material mắt, material 2 sprite thanh máu) để
+                    // dispose() giải phóng đủ. Thứ hệ thống khác gắn thêm vào mesh sau này không thuộc danh sách.
+                    this.ownedGpuResources = collectOwnedGpuResources(this.mesh, [this.defaultMaterial, this.flashMaterial, this.hydroFlashMaterial]);
+
                     this.alignToGround();
+                }
+
+                // Alpha M1 (BUG-12): gỡ slime khỏi scene + giải phóng toàn bộ tài nguyên GPU nó sở hữu. Dùng cho CẢ 2
+                // nơi xoá slime: dọn slime chết (animate(), 08) và xoá slime của camp lúc nạp save (applySaveData(), 06).
+                // Trước M1 cả 2 nơi chỉ dispose geometry thân + material ĐANG gắn + 2 material thanh máu -> rò mắt
+                // (geometry + material) và 2/3 material thân mỗi con.
+                dispose() {
+                    if (this.mesh && this.mesh.parent) this.mesh.parent.remove(this.mesh);
+                    (this.ownedGpuResources || []).forEach(res => res.dispose());
+                    this.ownedGpuResources = [];
                 }
 
                 // Cập nhật độ dài thanh máu theo % HP hiện tại — gọi mỗi khi HP thay đổi (takeDamage)
@@ -606,10 +735,14 @@
                 // truyền (null/undefined), fallback về hành vi knockback CŨ (enemyRecoilForce) để
                 // không phá bất kỳ lời gọi takeDamage() nào chưa cập nhật impact.
                 takeDamage(damage, direction, isHydro, impact) {
+                    // Alpha M0.1 — slime đã chết không nhận thêm damage event nào (chặn khả năng chạy lại
+                    // nhánh chết: onEnemyKilled/loot/EXP 2 lần nếu 1 caller quên lọc alive).
+                    if (!this.alive) return;
                     // Character #3 (Polearm) Validation — Damage Source Metadata: ghi lại NGAY ĐẦU
                     // hàm, TRƯỚC khi trừ HP (đúng yêu cầu implementation — Reactive Skill polling
                     // enemy.hp ở FRAME SAU cần đọc đúng lastDamageSource của lần damage này).
                     this.lastDamageSource = (impact && impact.source) ? impact.source : null;
+                    window.recordDamageEvent(this, damage, impact); // DAMAGE EVENT CONTRACT — xem bên dưới
 
                     // `player` vẫn cần cho phần "báo động đồng đội cùng camp" bên dưới (kiểm tra
                     // khoảng cách) — KHÔNG còn dùng để tính damage (xem giải thích Talent System v2
@@ -619,12 +752,14 @@
                     // Bước 5: trừ HP mục tiêu (Math.max(0, ...) đảm bảo không bao giờ xuống âm).
                     this.hp = Math.max(0, this.hp - finalDamage);
 
-                    // Bước 6: hiển thị Damage Number (v0.7 mục 3) — bay lên phía trên đầu slime, màu
-                    // trắng duy nhất, không phân biệt chí mạng/nguyên tố ở phiên bản này.
+                    // Bước 6: hiển thị Damage Number (v0.7 mục 3) — bay lên phía trên đầu slime.
+                    // Readability Batch: style (màu/cỡ) suy ra từ CHÍNH `impact` của damage event này
+                    // (getDamageNumberStyle, vfx.js) — con số vẫn là finalDamage vừa trừ HP ở trên.
                     if (window.spawnDamageNumber) {
                         const numberOrigin = this.position.clone();
                         numberOrigin.y += this.height * 0.6;
-                        window.spawnDamageNumber(numberOrigin, finalDamage);
+                        const numberStyle = window.getDamageNumberStyle ? window.getDamageNumberStyle(impact) : undefined;
+                        window.spawnDamageNumber(numberOrigin, finalDamage, numberStyle);
                     }
 
                     // Bước 7: cập nhật thanh HP (v0.7 mục 4) — hiện ngay khi bị đánh, tự đếm ngược ẩn
@@ -747,6 +882,16 @@
                     if (this.flashTimer > 0) {
                         this.flashTimer -= dt;
                         if (this.flashTimer <= 0) this.bodyMesh.material = this.defaultMaterial;
+                    }
+
+                    // Alpha M1 (BUG-04): Hydro squash — giữ dáng bẹp trong hydroSquashTimer, sau đó co giãn về
+                    // restMeshScale (cùng tốc độ 1 - exp(-20*dt) như class Enemy ở trên) và CHỐT ĐÚNG giá trị gốc
+                    // khi đã đủ gần. Trước M1 class Slime không có khối này nên slime bị bẹp vĩnh viễn.
+                    if (this.hydroSquashTimer > 0) {
+                        this.hydroSquashTimer -= dt;
+                    } else if (this.hydroSquashTimer !== undefined && !this.mesh.scale.equals(this.restMeshScale)) {
+                        this.mesh.scale.lerp(this.restMeshScale, 1 - Math.exp(-20 * dt));
+                        if (this.mesh.scale.distanceToSquared(this.restMeshScale) < 1e-6) this.mesh.scale.copy(this.restMeshScale);
                     }
 
                     // Hit Reaction / Poise System v1 — Phase 4 (Combat Hit Reaction 2.0): khác bản
@@ -891,6 +1036,8 @@
                             // ĐỘC LẬP (3-6s ngẫu nhiên) chạy song song với state machine, KHÔNG phải mỗi
                             // lần vào idle mới random lại — nên chế độ này giữ nguyên xuyên suốt NHIỀU
                             // lần idle liên tiếp cho tới khi behaviorModeTimer hết hạn.
+                            const homeAngle = campHomeAngle(this);   // Alpha M4: ra quá xa camp -> trườn về tâm camp
+                            if (homeAngle !== null) this.wanderAngle = homeAngle;
                             if (!this.isIdleStationary) {
                                 const dir = new THREE.Vector3(Math.sin(this.wanderAngle), 0, Math.cos(this.wanderAngle));
                                 this.position.addScaledVector(dir, this.speed * 0.25 * dt);
@@ -904,7 +1051,11 @@
                             if (playerDetected) { this.state = 'prep'; this.stateTimer = 0.15; this.isEngagingPlayer = true; } 
                             else {
                                 this.stateTimer -= dt;
-                                if (this.stateTimer <= 0) { this.state = 'prep'; this.stateTimer = randomInRange(SLIME_WANDER_CONFIG.prepDuration); this.wanderAngle += (Math.random() - 0.5) * 2; }
+                                if (this.stateTimer <= 0) {
+                                    this.state = 'prep'; this.stateTimer = randomInRange(SLIME_WANDER_CONFIG.prepDuration); this.wanderAngle += (Math.random() - 0.5) * 2;
+                                    const homeJump = campHomeAngle(this);   // Alpha M4: cú nhảy lang thang kế tiếp hướng về camp
+                                    if (homeJump !== null) this.wanderAngle = homeJump + (Math.random() - 0.5) * 0.6;
+                                }
                             }
                         } 
                         else if (this.state === 'chase') {
@@ -1036,28 +1187,13 @@
                                 const distNow = this.position.distanceTo(player.position);
                                 if (distNow <= this.attackHitRange && player.invulnTimer <= 0) {
                                     this.player_hasBeenHitThisAttack = true;
-                                    // Pre-Alpha v0.7 — Core Stats: Final Damage tính qua calculateFinalDamage()
-                                    // (ATK của Slime, DEF của player), KHÔNG còn random thô theo khoảng
-                                    // minAttackDamage/maxAttackDamage như trước v0.7. multiplier=1 vì Slime
-                                    // chỉ có 1 loại đòn tấn công (không có hệ số riêng theo loại đòn như
-                                    // player.attack.melee/plunge/burst/hydroProjectile).
-                                    const dmg = window.calculateFinalDamage(this.stats.atk, player.stats.def);
-                                    player.hp = Math.max(0, player.hp - dmg); player.invulnTimer = 0.8;
-                                    window.triggerDamageFlash(); sfx.playHit();
-                                    // Damage Number khi PLAYER nhận sát thương (v0.7 mục 3) — cùng hàm
-                                    // dùng cho Enemy, chỉ khác điểm xuất phát (trên đầu player thay vì
-                                    // enemy).
-                                    if (window.spawnDamageNumber) {
-                                        const numberOrigin = player.position.clone();
-                                        numberOrigin.y += player.height * 0.75;
-                                        window.spawnDamageNumber(numberOrigin, dmg);
-                                    }
-                                    cameraState.shakeTimer = 0.25; cameraState.shakeIntensity = 0.35;
-                                    // Stagger nhẹ ~0.1s: chỉ là hiệu ứng knockback nhẹ, không khóa input người chơi
-                                    const pushDir = new THREE.Vector3().subVectors(player.position, this.position); pushDir.y = 0;
-                                    if (pushDir.lengthSq() > 0.0001) player.velocity.add(pushDir.normalize().multiplyScalar(4.0));
-                                    player.staggerTimer = 0.1;
-                                    if (player.hp <= 0) window.enterDeadState('combat');
+                                    // Đòn đã CHẮC CHẮN trúng (đúng khung tấn công, đúng tầm, player không bất tử). Alpha M2:
+                                    // phần xử lý sau khi trúng (Counter #5 -> calculateFinalDamage(ATK Slime, DEF player) ->
+                                    // HP/bất tử/phản hồi/đẩy lùi/gục) chuyển nguyên vẹn vào window.applyEnemyAttackToPlayer()
+                                    // (xem ngay dưới recordDamageEvent) — đường DUY NHẤT dùng chung với quái khung M2, số liệu
+                                    // mặc định của hàm = đúng số liệu khối inline cũ. 1 lần nhảy = 1 attackId.
+                                    this.attackEventSeq = (this.attackEventSeq || 0) + 1;
+                                    window.applyEnemyAttackToPlayer(this, { kind: 'melee', attackId: this.id + ':' + this.attackEventSeq });
                                 }
                             }
                         }

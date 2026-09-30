@@ -717,6 +717,11 @@
         // còn nhảy sang Door Intro như thiết kế cũ) — người chơi bấm màn hình ở đây trước, Door Intro
         // chỉ xuất hiện SAU khi bấm Start.
         DOM.btnConfirmName.addEventListener('click', () => {
+            // Alpha M9 (KI-340, m8/rc1-journey.js bản PC): nút này giữ focus sau khi bấm chuột -> Enter ở màn Start kích hoạt
+            // lại nó (hành vi mặc định của nút đang focus) -> hiện lại lớp Start trên Door Intro, Enter tiếp theo chạy lại Door
+            // Intro mãi. Popup đã đóng thì bỏ qua; bỏ focus sau khi xác nhận.
+            if (!DOM.popupCharName.classList.contains('show')) return;
+            DOM.btnConfirmName.blur();
             audio.playClick();
             state.charName = DOM.inputCharName.value.trim();
             DOM.displayUserName.textContent = `User: ${state.charName}`;
@@ -815,6 +820,7 @@
 
         window.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && state.isOverlayVisible) {
+                e.preventDefault();   // Alpha M9 (KI-340): Enter không kích hoạt thêm nút đang focus (vd. nút Xác nhận tên)
                 DOM.btnStartGame.click();
             }
         });
@@ -861,6 +867,7 @@
 
         window.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && DOM.stageDoorIntro.classList.contains('active') && state.isDoorIntroReady) {
+                e.preventDefault();   // Alpha M9 (KI-340)
                 DOM.stageDoorIntro.click();
             }
         });
@@ -976,11 +983,22 @@
             }, 80);
         }
 
+        // Alpha M7 (vòng đời tài nguyên): dừng mọi video của Opening khi vào gameplay. sceneRenderer.stopAll() chỉ dừng các
+        // vòng vẽ canvas dự phòng; video nền Title (#video-background, thuộc tính loop) trước đây vẫn phát / giải mã ngầm phía
+        // sau gameplay (#opening-root chỉ bị display:none) — tốn CPU / pin trên điện thoại khi có asset thật (đã tái hiện bằng
+        // video thử trong tools/tests/m7/lifecycle.js). Return to Title gọi lại playVideoOrFallback() nên video phát lại như cũ.
+        function stopOpeningMedia() {
+            [DOM.videoLogo, DOM.videoBg, DOM.videoDoorIntro, DOM.videoOpenDoor, DOM.videoLoadingScene].forEach(v => {
+                if (v && !v.paused) { try { v.pause(); } catch (e) { /* bỏ qua */ } }
+            });
+        }
+
         // Điểm nối Opening -> Gameplay thật (v0.9 mục 6): ẩn #opening-root, dừng nhạc/canvas Opening
         // (tránh rò rỉ requestAnimationFrame loop và audio chạy ngầm phía sau gameplay), rồi gọi
         // window.startGameplay() ĐÚNG 1 LẦN.
         function enterGameplay() {
             sceneRenderer.stopAll();
+            stopOpeningMedia();
             const openingRoot = document.getElementById('opening-root');
             if (openingRoot) {
                 openingRoot.style.transition = 'opacity 0.6s ease';
@@ -1005,6 +1023,7 @@
         // canvas/HUD và mở khoá lại input/update logic (window.isGamePaused = false).
         function resumeGameplay() {
             sceneRenderer.stopAll();
+            stopOpeningMedia();   // Alpha M7 — xem stopOpeningMedia()
             const openingRoot = document.getElementById('opening-root');
             if (openingRoot) {
                 openingRoot.style.transition = 'opacity 0.6s ease';

@@ -11,6 +11,19 @@
 // — ứng với talents.normalAttack.combo[comboIndex] (category 'melee', BẮT BUỘC truyền comboIndex
 // 0-based), talents.normalAttack.{plunge,lowPlunge,highPlunge}, talents.skill.{beam,tick},
 // talents.burst.
+// Character #5/#6 (GI-CHAR-05-06): đọc 1 entry talent theo ĐƯỜNG DẪN (vd 'skill.counter') — dùng cho
+// category dạng 'talent:<path>' để kỹ năng mới KHÔNG cần thêm nhánh if riêng cho từng loại đòn.
+function getTalentEntryByPath(talents, path) {
+    let node = talents;
+    const parts = String(path || '').split('.');
+    for (let i = 0; i < parts.length; i++) {
+        if (!node || typeof node !== 'object') return null;
+        node = node[parts[i]];
+    }
+    return (node && typeof node === 'object') ? node : null;
+}
+window.getTalentEntryByPath = getTalentEntryByPath;
+
 function getTalentScaling(character, category, comboIndex) {
     const talents = character && character.talents;
     // Fallback AN TOÀN NGƯỢC nếu thiếu talents/category: trả về scaling TƯƠNG ĐƯƠNG hành vi
@@ -54,6 +67,14 @@ function getTalentScaling(character, category, comboIndex) {
         // tham số (character, category, comboIndex) cho MỌI category, nhất quán với thiết kế hiện có.
         const hits = getPolearmHitsForCombo(player.comboIndex);
         scaling = (Array.isArray(hits) && hits[comboIndex] && hits[comboIndex].scaling) ? hits[comboIndex].scaling : null;
+    } else if (category === 'swordHits') {
+        // Character #4 — Normal Attack kiếm dạng hits[] (combo[i].hits[comboIndex]). Dùng lại hàm đọc
+        // data getPolearmHitsForCombo() (chỉ là bộ đọc combo[i].hits[] chung — KHÔNG dùng state của #3),
+        // luôn đọc dataset thường (không có Burst State dataset cho kiếm).
+        const hits = getPolearmHitsForCombo(player.comboIndex, false);
+        scaling = (Array.isArray(hits) && hits[comboIndex] && hits[comboIndex].scaling) ? hits[comboIndex].scaling : null;
+    } else if (category === 'skillVortex') {
+        scaling = (talents.skill && talents.skill.vortex && talents.skill.vortex.scaling) ? talents.skill.vortex.scaling : null;
     } else if (category === 'skillBeam') {
         scaling = (talents.skill && talents.skill.beam && talents.skill.beam.scaling) ? talents.skill.beam.scaling : null;
     } else if (category === 'skillTick') {
@@ -90,6 +111,9 @@ function getTalentScaling(character, category, comboIndex) {
         const hits = (talents.burstState && talents.burstState.chargedAttack && Array.isArray(talents.burstState.chargedAttack.hits))
             ? talents.burstState.chargedAttack.hits : [];
         scaling = (hits[comboIndex] && hits[comboIndex].scaling) ? hits[comboIndex].scaling : null;
+    } else if (typeof category === 'string' && category.indexOf('talent:') === 0) {
+        const entry = getTalentEntryByPath(talents, category.slice(7));
+        scaling = (entry && entry.scaling) ? entry.scaling : null;
     }
     if (!scaling || typeof scaling.multiplier !== 'number') return legacyScaling;
     // Trả về BẢN SAO (không phải tham chiếu trực tiếp tới object trong CHARACTER_ROSTER) — nơi
@@ -134,6 +158,11 @@ function getTalentImpact(character, category, comboIndex) {
         // ở trên (đọc player.comboIndex trực tiếp để xác định slot, comboIndex tham số = hitIndex).
         const hits = getPolearmHitsForCombo(player.comboIndex);
         impact = (Array.isArray(hits) && hits[comboIndex] && hits[comboIndex].impact) ? hits[comboIndex].impact : null;
+    } else if (category === 'swordHits') {
+        const hits = getPolearmHitsForCombo(player.comboIndex, false);
+        impact = (Array.isArray(hits) && hits[comboIndex] && hits[comboIndex].impact) ? hits[comboIndex].impact : null;
+    } else if (category === 'skillVortex') {
+        impact = (talents.skill && talents.skill.vortex && talents.skill.vortex.impact) ? talents.skill.vortex.impact : null;
     } else if (category === 'coordinatedAttack') {
         impact = (talents.coordinatedAttack && talents.coordinatedAttack.impact) ? talents.coordinatedAttack.impact : null;
     } else if (category === 'thunderFinisher') {
@@ -147,6 +176,9 @@ function getTalentImpact(character, category, comboIndex) {
         const hits = (talents.burstState && talents.burstState.chargedAttack && Array.isArray(talents.burstState.chargedAttack.hits))
             ? talents.burstState.chargedAttack.hits : [];
         impact = (hits[comboIndex] && hits[comboIndex].impact) ? hits[comboIndex].impact : null;
+    } else if (typeof category === 'string' && category.indexOf('talent:') === 0) {
+        const entry = getTalentEntryByPath(talents, category.slice(7));
+        impact = (entry && entry.impact) ? entry.impact : null;
     }
     // skillBeam/skillTick/burst: CHƯA có impact ở Alpha v1.0 (yêu cầu đã xác nhận — "Skill/Burst
     // chưa thêm Impact") — rơi thẳng về defaultImpact, không cần nhánh riêng.
@@ -171,7 +203,9 @@ function calculatePlayerToEnemyDamage(character, scaling, enemy) {
     // nhân vật MỚI thay vì nhân vật đã bắn ra đạn, phá nguyên tắc "Raw Damage đóng băng lúc bắn"
     // đã thống nhất). Tìm đúng member trong partyState theo character.id — AN TOÀN NGƯỢC: nếu
     // không tìm thấy (character null/id lạ), fallback về activeMember hiện tại.
-    const matchedMember = character && character.id ? partyState.find(m => m && m.id === character.id) : null;
+    const matchedMember = character && character.id
+        ? (partyState.find(m => m && m.id === character.id) || (window.Party ? window.Party.getBenchedMember(character.id) : null))
+        : null; // Task 74821: nhân vật đã rời đội (bench) vẫn dùng đúng stats của chính họ
     const activeMember = matchedMember || partyState[activeCharacterIndex];
     const stats = activeMember ? activeMember.stats : player.stats; // an toàn nếu gọi ngoài lúc party chưa sẵn sàng
 
@@ -317,7 +351,7 @@ function getActiveSkillAimConfig() {
 window.getActiveSkillAimConfig = getActiveSkillAimConfig;
 
 // Character Foundation v2 — Dependency Fix (mục D.3): 2 hằng số fallback DÙNG CHUNG cho pose
-// Sword lúc Attack khi nhân vật/đòn KHÔNG có animation.attack (VD test_character_anemo) —
+// Sword lúc Attack khi nhân vật/đòn KHÔNG có animation.attack (VD nhân vật thiếu data) —
 // TRƯỚC ĐÂY cùng 2 giá trị này bị LẶP LẠI dưới dạng magic number ở 5 nơi khác nhau (combat.js +
 // file 08), dễ lệch nhau nếu sau này cần đổi giá trị fallback mặc định. Từ v2: định nghĩa 1
 // LẦN DUY NHẤT ở đây, mọi nơi đọc qua tên hằng số này. KHÔNG đổi giá trị số (giữ NGUYÊN 100% so
@@ -358,7 +392,7 @@ window.getWeaponGripRotation = getWeaponGripRotation;
 // getActiveWeaponType(): điểm tra cứu DUY NHẤT cho "nhân vật đang active dùng vũ khí gì" — mọi nơi
 // cần rẽ nhánh melee/bow (triggerAttack()/updateCombat() ở file 08/handleAttackDown()) PHẢI đọc qua
 // hàm này, KHÔNG tự ý so sánh character.id/character.weaponType rải rác. Fallback 'melee' nếu
-// thiếu field (an toàn ngược 100% cho Character #1/test_character_anemo vốn có weaponType: null —
+// thiếu field (an toàn ngược 100% cho Character #1 vốn có weaponType: null —
 // hành vi melee cone-hit GIỮ NGUYÊN không đổi).
 //
 // Character #3 (Polearm) Validation — GIỮ NGUYÊN 100% return value/behavior (chỉ 'bow'|'melee'),
@@ -383,7 +417,7 @@ window.getActiveWeaponType = getActiveWeaponType;
 // binary như getActiveWeaponType()). Đọc character.weapon.type (schema mới —
 // {category,type,visualProfile,attackProfile}, xem CHARACTER_ROSTER) TRƯỚC, fallback
 // character.weaponType (schema cũ, chỉ có 'bow'|null) NẾU weapon.type chưa khai báo, fallback cuối
-// 'sword' (mặc định an toàn ngược 100% cho Character #1/test_character_anemo — cả 2 đều chưa có
+// 'sword' (mặc định an toàn ngược 100% cho Character #1 — cả 2 đều chưa có
 // weapon.type lẫn weaponType='bow', vốn đã là Sword-behavior từ trước).
 //
 // DÙNG CHO: mọi dispatch cần phân biệt CHÍNH XÁC Sword vs Polearm vs Bow (visual mesh-specific code
@@ -395,9 +429,20 @@ function getActiveWeaponCategory() {
     const wt = (character && character.weapon && character.weapon.type) || (character && character.weaponType);
     if (wt === 'bow') return 'bow';
     if (wt === 'polearm') return 'polearm';
+    // Character #5/#6: 2 loại vũ khí mới. TRƯỚC ĐÂY loại lạ rơi thẳng về 'sword' (âm thầm chạy toàn bộ
+    // code kiếm: lao người, vệt chém...). Giờ trả đúng tên; các nhánh cần hành vi chung dùng 2 helper dưới.
+    if (wt === 'claymore') return 'claymore';
+    if (wt === 'catalyst') return 'catalyst';
     return 'sword';
 }
 window.getActiveWeaponCategory = getActiveWeaponCategory;
+
+// Vũ khí có LƯỠI dùng chung đường đòn chém của kiếm (hits[], vệt chém, slash wave): sword + claymore.
+function isBladeWeaponCategory(cat) { return cat === 'sword' || cat === 'claymore'; }
+window.isBladeWeaponCategory = isBladeWeaponCategory;
+// Vũ khí có Normal Attack là PROJECTILE (đi qua applyBowArrowSpawnTick + TargetAssist): bow + catalyst.
+function isProjectileWeaponCategory(cat) { return cat === 'bow' || cat === 'catalyst'; }
+window.isProjectileWeaponCategory = isProjectileWeaponCategory;
 
 // getBowArrowsForCombo(comboIndex): trả về mảng arrows[] của SHOT comboIndex (1-based, ĐÚNG quy
 // ước player.comboIndex hiện có) của nhân vật Bow đang active — hoặc mảng rỗng an toàn nếu thiếu
@@ -486,7 +531,13 @@ function applyBowArrowSpawnTick(activeElapsed, forward) {
         const aimDirection = validTarget ? TargetAssist.getAimDirection(spawnPosition, validTarget) : null;
         const finalDirection = aimDirection || forward;
 
-        spawnArrow(character, spawnPosition, finalDirection, arrowScaling, arrowImpact, { speed: arrowSpeed });
+        // Character #6 (Catalyst): arrows[i] có thể khai báo thêm thông số projectile (orb điện: không trọng
+        // lực, không cắm vào tường, tầm giới hạn bằng maxLifeTime). Bow không khai báo -> y hệt trước.
+        const arrowOverrides = { speed: arrowSpeed };
+        ['gravity', 'drag', 'maxLifeTime', 'stuckLifeTime', 'visual', 'color', 'element', 'hitboxSize', 'sweep'].forEach(k => {
+            if (arrowData && arrowData[k] !== undefined) arrowOverrides[k] = arrowData[k];
+        });
+        spawnArrow(character, spawnPosition, finalDirection, arrowScaling, arrowImpact, arrowOverrides);
 
         sfx.playSwing(); // GIỮ NGUYÊN SFX hiện có — nợ kỹ thuật (chưa có SFX riêng cho Bow release), không thuộc phạm vi task
     }
@@ -844,8 +895,42 @@ function applyChargedAttackHitsTick(dt, forward) {
 
         player.chargedHitsTriggered[hitIndex] = true;
 
+        // Readability Batch: hit AoE 'circle' (Spinning Thrust) -> hiện vòng tròn mặt đất đúng bằng
+        // hitRadius của CHÍNH hit này (data), tại đúng thời điểm hit mở — dù trúng hay trượt, người
+        // chơi thấy vùng đánh 360°. Hit 'cone' (Sword/cũ) không có hitShape -> không vẽ gì (giữ nguyên).
+        if (hitData && hitData.hitShape === 'circle' && typeof hitData.hitRadius === 'number' && window.spawnGroundRing) {
+            const ringVfx = window.getCharacterVfxElement ? window.getCharacterVfxElement(character) : null;
+            const ringColor = ringVfx ? window.getElementVfx(ringVfx).main
+                : (player.isBurstStateActive || (character && character.element === 'Electro')) ? window.FX_COLORS.electro : window.FX_COLORS.white;
+            window.spawnGroundRing(window.groundPointUnder(player.position), hitData.hitRadius, ringColor, { life: 0.3, thickness: 0.1 });
+        }
+        // Task 3 (Combat VFX): hit 'cone' (mặc định, VD Charged Attack kiếm của Traveler) của nhân vật
+        // opt-in vfxElement -> quạt sáng quét ĐÚNG vùng cone thật (range 2.8 / dot 0.45 như
+        // resolveMeleeHitCollision) tại đúng thời điểm hit mở — người chơi thấy timing + vùng đánh.
+        const caVfxElement = window.getCharacterVfxElement ? window.getCharacterVfxElement(character) : null;
+        if (caVfxElement && !(hitData && hitData.hitShape === 'circle') && window.spawnConeFlash) {
+            window.spawnConeFlash(window.groundPointUnder(player.position), forward, 2.8, 0.45, window.getElementVfx(caVfxElement).main, { life: 0.28, opacity: 0.6 });
+        }
+
         const hitScaling = getTalentScaling(character, category, hitIndex);
         const hitImpact = getTalentImpact(character, category, hitIndex);
+
+        // Character #6 (Catalyst): hit có center 'target' -> vùng AoE đặt tại mục tiêu (soft target gần nhất
+        // trong targetRange, không có thì cách trước mặt fallbackDistance m) thay vì quanh người chơi.
+        // Điểm được CHỐT 1 LẦN cho cả Charged Attack (không đuổi theo mục tiêu).
+        let hitOrigin = player.position;
+        if (hitData && hitData.center === 'target') {
+            if (!player.chargedAttackTargetPoint) {
+                const tgt = (typeof TargetAssist !== 'undefined') ? TargetAssist.getNearestTarget(player.position, { maxRange: hitData.targetRange || 12 }) : null;
+                player.chargedAttackTargetPoint = tgt ? tgt.position.clone()
+                    : player.position.clone().addScaledVector(forward, hitData.fallbackDistance || 6);
+            }
+            hitOrigin = player.chargedAttackTargetPoint;
+            if (typeof hitData.hitRadius === 'number' && window.spawnGroundRing) {
+                const tv = window.getCharacterVfxElement ? window.getCharacterVfxElement(character) : null;
+                window.spawnGroundRing(window.groundPointUnder(hitOrigin), hitData.hitRadius, tv ? window.getElementVfx(tv).main : 0xffffff, { life: 0.35, thickness: 0.12 });
+            }
+        }
 
         enemies.forEach(enemy => {
             if (!enemy.alive) return;
@@ -855,19 +940,21 @@ function applyChargedAttackHitsTick(dt, forward) {
             // Character #3 (Polearm) Validation — dùng resolveMeleeHitCollision() dùng chung, đọc
             // hitData.hitShape/hitRadius (optional — Sword/Charged Attack hiện có KHÔNG khai báo,
             // fallback 'cone' GIỮ NGUYÊN 100% hành vi cũ, xem hàm dùng chung phía trên).
-            const result = resolveMeleeHitCollision(enemy, player.position, forward, hitData);
+            const result = resolveMeleeHitCollision(enemy, hitOrigin, forward, hitData);
             if (result.hit) {
                 const finalDamage = calculatePlayerToEnemyDamage(character, hitScaling, enemy);
                 enemy.takeDamage(finalDamage, forward, false, withDamageSource(hitImpact, character));
                 player.chargedHasHitList.push(hitKey);
 
-                hitstopTimer = COMBAT_FEEL_CONFIG.hitStopDuration;
+                // hitData.hitstop / hitData.shake (optional, Character #5): đòn nặng khựng lâu hơn. Không khai báo -> như cũ.
+                hitstopTimer = (hitData && typeof hitData.hitstop === 'number') ? hitData.hitstop : COMBAT_FEEL_CONFIG.hitStopDuration;
                 sfx.playHit();
                 cameraState.shakeTimer = COMBAT_FEEL_CONFIG.cameraShake.duration;
-                cameraState.shakeIntensity = COMBAT_FEEL_CONFIG.cameraShake.intensity;
+                cameraState.shakeIntensity = (hitData && typeof hitData.shake === 'number') ? hitData.shake : COMBAT_FEEL_CONFIG.cameraShake.intensity;
 
                 const hitPoint = enemy.position.clone().addScaledVector(result.toEnemy, -0.4);
-                spawnCombatSparks(hitPoint, result.toEnemy);
+                if (caVfxElement && window.spawnHitImpact) window.spawnHitImpact(hitPoint, result.toEnemy, { element: caVfxElement, weight: window.impactWeight(hitImpact) });
+                else spawnCombatSparks(hitPoint, result.toEnemy, player.isBurstStateActive && window.FX_COLORS ? window.FX_COLORS.electro : undefined);
 
                 if (!enemy.alive) spawnDeathParticles(enemy.position);
             }
@@ -934,7 +1021,9 @@ function applyPolearmNormalAttackHitsTick(activeElapsed, forward) {
                 cameraState.shakeIntensity = COMBAT_FEEL_CONFIG.cameraShake.intensity;
 
                 const hitPoint = enemy.position.clone().addScaledVector(result.toEnemy, -0.4);
-                spawnCombatSparks(hitPoint, result.toEnemy);
+                // Readability Batch: trong Burst State tia lửa chuyển sang tím Electro — người chơi
+                // thấy ngay đòn đang được cường hoá (dataset Burst), không cần nhìn HUD.
+                spawnCombatSparks(hitPoint, result.toEnemy, isBurst && window.FX_COLORS ? window.FX_COLORS.electro : undefined);
 
                 if (!enemy.alive) spawnDeathParticles(enemy.position);
             }
@@ -942,6 +1031,162 @@ function applyPolearmNormalAttackHitsTick(activeElapsed, forward) {
     }
 }
 window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
+
+// swordComboUsesHits(): đòn kiếm HIỆN TẠI có khai báo hits[] hay không (Character #4). Traveler khai báo
+// scaling phẳng (không hits[]) -> false -> file 08 đi ĐÚNG nhánh 1-hit cũ, hành vi Traveler không đổi.
+function swordComboUsesHits() {
+    return isBladeWeaponCategory(getActiveWeaponCategory()) && getPolearmHitsForCombo(player.comboIndex, false).length > 0;
+}
+window.swordComboUsesHits = swordComboUsesHits;
+
+// applySwordNormalAttackHitsTick(activeElapsed, forward): Character #4 — ĐÚNG PATTERN
+// applyPolearmNormalAttackHitsTick() (hits[].time tính từ đầu 'active', collision qua
+// resolveMeleeHitCollision() dùng chung, damage qua calculatePlayerToEnemyDamage() -> takeDamage()) nhưng
+// dùng STATE RIÊNG: player.swordHitsTriggered (hit đã mở chưa) + player.swordHasHitList ("enemyId:hitIndex"
+// — 1 hit chỉ trúng 1 enemy tối đa 1 lần; NA3 có 2 hit => 2 damage event độc lập, mỗi cái collision riêng).
+// KHÔNG gọi tryGrantThunderCharge (cơ chế riêng của #3).
+function applySwordNormalAttackHitsTick(activeElapsed, forward) {
+    const hits = getPolearmHitsForCombo(player.comboIndex, false);
+    const character = getActiveCharacterData();
+    const vfxElement = window.getCharacterVfxElement ? window.getCharacterVfxElement(character) : null;
+
+    for (let hitIndex = 0; hitIndex < hits.length; hitIndex++) {
+        const hitData = hits[hitIndex];
+        const hitTime = (hitData && typeof hitData.time === 'number') ? hitData.time : 0;
+        if (activeElapsed < hitTime) continue;
+        if (player.swordHitsTriggered[hitIndex]) continue;
+        player.swordHitsTriggered[hitIndex] = true;
+
+        // arcFlash (data, chỉ hình ảnh): vòng cung gió quét ĐÚNG vùng cone thật tại lúc hit mở (NA5).
+        if (hitData && hitData.arcFlash && vfxElement && window.spawnConeFlash) {
+            window.spawnConeFlash(window.groundPointUnder(player.position), forward, 3.0, 0.45, window.getElementVfx(vfxElement).light, { life: 0.3, opacity: 0.65 });
+        }
+
+        const hitScaling = getTalentScaling(character, 'swordHits', hitIndex);
+        const hitImpact = getTalentImpact(character, 'swordHits', hitIndex);
+
+        enemies.forEach(enemy => {
+            if (!enemy.alive) return;
+            const hitKey = enemy.id + ':' + hitIndex;
+            if (player.swordHasHitList.includes(hitKey)) return;
+            const result = resolveMeleeHitCollision(enemy, player.position, forward, hitData);
+            if (!result.hit) return;
+
+            const finalDamage = calculatePlayerToEnemyDamage(character, hitScaling, enemy);
+            enemy.takeDamage(finalDamage, forward, false, withDamageSource(hitImpact, character));
+            player.swordHasHitList.push(hitKey);
+
+            hitstopTimer = (hitData && typeof hitData.hitstop === 'number') ? hitData.hitstop : COMBAT_FEEL_CONFIG.hitStopDuration;
+            sfx.playHit();
+            cameraState.shakeTimer = COMBAT_FEEL_CONFIG.cameraShake.duration;
+            cameraState.shakeIntensity = (hitData && typeof hitData.shake === 'number') ? hitData.shake : COMBAT_FEEL_CONFIG.cameraShake.intensity;
+
+            const hitPoint = enemy.position.clone().addScaledVector(result.toEnemy, -0.4);
+            if (vfxElement && window.spawnHitImpact) window.spawnHitImpact(hitPoint, result.toEnemy, { element: vfxElement, weight: window.impactWeight(hitImpact) });
+            else spawnCombatSparks(hitPoint, result.toEnemy);
+            if (!enemy.alive) spawnDeathParticles(enemy.position);
+        });
+    }
+}
+window.applySwordNormalAttackHitsTick = applySwordNormalAttackHitsTick;
+
+// tryGrantThunderCharge(forward): Character #3 Validation — gọi TẠI ĐÚNG 2 ĐIỂM chuyển state
+// active->recovery / chargedActive->chargedRecovery (file 08) — CHỈ khi player.isBurstStateActive
+// (Thunder Charge KHÔNG tồn tại ngoài Burst State). Kiểm tra player.polearmHasHitList.length > 0
+// (đòn VỪA HOÀN THÀNH có gây damage thành công hay không — KHÔNG dùng player.hasHitList, đó là của
+// Sword, đã chốt rõ "use Character #3's own polearmHasHitList"). Whiff (mảng rỗng) -> +0, KHÔNG cộng
+// gì. Một đòn hoàn thành, dù bao nhiêu hit event bên trong, TỐI ĐA +1 (đã đúng tự nhiên vì hàm này
+// chỉ được gọi ĐÚNG 1 LẦN mỗi lần chuyển state, không phải mỗi hit).
+//
+// Nếu thunderChargeCooldownTimer > 0 (đang trong cửa sổ post-Finisher) -> KHÔNG cộng Charge (nhưng
+// đòn NA/CA vẫn đã damage bình thường TRƯỚC ĐÓ — hàm này chỉ chặn phần THƯỞNG +1 Charge, không ảnh
+// hưởng gì đến damage đã xảy ra).
+//
+// Đạt 3/3 -> TỰ ĐỘNG trigger Thunder Finisher ngay tại đây (không cần input riêng) -> reset về 0 ->
+// set thunderChargeCooldownTimer (chặn tích Charge mới 1 khoảng ngắn — đưa tần suất Finisher về
+// đúng target 2-3 lần/Burst, đã tính toán ở Phase 11 Balance).
+function tryGrantThunderCharge(forward) {
+    if (!player.isBurstStateActive) return;
+    if (player.polearmHasHitList.length === 0) return; // whiff -> +0
+    if (player.thunderChargeCooldownTimer > 0) return; // post-Finisher cooldown đang chặn
+
+    player.thunderCharge = Math.min(3, player.thunderCharge + 1);
+
+    if (player.thunderCharge >= 3) {
+        triggerThunderFinisher(forward);
+        player.thunderCharge = 0;
+        player.thunderChargeCooldownTimer = THUNDER_FINISHER_POST_COOLDOWN;
+    }
+}
+window.tryGrantThunderCharge = tryGrantThunderCharge;
+
+// THUNDER_FINISHER_POST_COOLDOWN: PLACEHOLDER (giữa 0.8-1.2s đã chốt) — chặn +1 Charge mới ngay sau
+// Finisher, đưa tần suất về ~2-3 lần/Burst (Phase 11 Balance đã tính toán chi tiết).
+const THUNDER_FINISHER_POST_COOLDOWN = 1.0;
+window.THUNDER_FINISHER_POST_COOLDOWN = THUNDER_FINISHER_POST_COOLDOWN;
+
+// triggerThunderFinisher(forward): damage event RIÊNG (category 'thunderFinisher', KHÔNG chung
+// pipeline với NA/CA đang chạy — Finisher là climax, không phải 1 hit trong combo). KHÔNG tự tạo
+// Thunder Charge (tránh loop — đã chốt rõ). Impact LAUNCH (reaction level, KHÔNG "heavy+launch" —
+// dùng pipeline resolveHitReaction()/Launch physics hiện có, KHÔNG viết công thức riêng). Finisher
+// KHÔNG kết thúc Burst State (không đổi attackState/isBurstStateActive ở đây).
+function triggerThunderFinisher(forward) {
+    const character = getActiveCharacterData();
+    const scaling = getTalentScaling(character, 'thunderFinisher');
+    const impact = getTalentImpact(character, 'thunderFinisher');
+
+    // Readability Batch — Finisher phải NHẬN RA NGAY: tia sét lớn đánh xuống ngay trước mặt nhân vật
+    // + sóng xung kích vàng-tím + banner HUD (ui.js, qua player.thunderFinisherFlashTimer). Chỉ hiển
+    // thị — collision/damage bên dưới KHÔNG đổi (vẫn cone mặc định như thiết kế đã implement).
+    if (window.spawnElectroStrike) {
+        const strikePoint = player.position.clone().addScaledVector(forward, 1.6);
+        window.spawnElectroStrike(strikePoint, { big: true, color: window.FX_COLORS.gold });
+        window.spawnGroundRing(window.groundPointUnder(strikePoint), 3.2, window.FX_COLORS.gold, { life: 0.5, thickness: 0.14 });
+    }
+    player.thunderFinisherFlashTimer = 0.9;
+
+    enemies.forEach(enemy => {
+        if (!enemy.alive) return;
+        const result = resolveMeleeHitCollision(enemy, player.position, forward, null); // cone mặc định (không hitShape trong data)
+        if (result.hit) {
+            const dmg = calculatePlayerToEnemyDamage(character, scaling, enemy);
+            enemy.takeDamage(dmg, result.toEnemy, false, withDamageSource(impact, character));
+
+            hitstopTimer = COMBAT_FEEL_CONFIG.hitStopDuration;
+            sfx.playHit();
+            cameraState.shakeTimer = COMBAT_FEEL_CONFIG.cameraShake.duration * 1.5; // nhấn mạnh climax
+            cameraState.shakeIntensity = COMBAT_FEEL_CONFIG.cameraShake.intensity * 1.5;
+
+            if (window.spawnElectroStrike) window.spawnElectroStrike(enemy.position, { big: true });
+            else spawnCombatSparks(enemy.position, result.toEnemy);
+            if (!enemy.alive) spawnDeathParticles(enemy.position);
+
+            // Character #3 Validation — Thunder Warrior's Resolve (Passive): Finisher THỰC SỰ TRÚNG
+            // ít nhất 1 enemy -> refresh TOÀN BỘ activeElectroEffects[] thuộc chính Character #3.
+            // Đặt TRONG nhánh result.hit (chỉ chạy khi có va chạm thật) — "No collision: no refresh"
+            // đã chốt rõ. Chỉ refresh 1 LẦN cho toàn bộ Finisher (không phải mỗi enemy trúng) — dùng
+            // cờ finisherRefreshedThisTrigger để tránh refresh lặp lại nếu trúng nhiều enemy.
+            if (character.talents && character.talents.passive && character.talents.passive.thunderWarriorsResolve
+                && !player.thunderFinisherRefreshedThisTrigger) {
+                player.thunderFinisherRefreshedThisTrigger = true;
+                player.reactiveRefreshFlashTimer = 0.8; // Readability Batch: HUD chip Coordinated nháy sáng khi được refresh
+                for (let i = 0; i < activeElectroEffects.length; i++) {
+                    const fx = activeElectroEffects[i];
+                    if (fx.active && fx.character && fx.character.id === character.id) {
+                        fx.elapsed = 0; // refresh về full duration — KHÔNG tái tạo effect đã hết hạn
+                                        // (effect hết hạn đã bị remove khỏi mảng ở update loop trước
+                                        // đó, nên vòng lặp này tự nhiên KHÔNG tìm thấy gì để refresh).
+                    }
+                }
+            }
+        }
+    });
+
+    // Reset cờ NGAY sau vòng lặp (mỗi lần triggerThunderFinisher() là 1 "phiên" riêng — cờ chỉ có ý
+    // nghĩa TRONG 1 lần gọi hàm này, không phải trạng thái lâu dài).
+    player.thunderFinisherRefreshedThisTrigger = false;
+}
+window.triggerThunderFinisher = triggerThunderFinisher;
 
 // ============================================================
 // ============================================================
@@ -1146,6 +1391,8 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
             // updateCombat() sẽ tự gọi lại handleAttackDown(state, true) nếu giữ đủ lâu.
             function handleAttackDown(fromHeldDelay = false) {
                 if (player.isClimbing || player.isSwimming || player.isDrowning || player.isDead) return;
+                // Character #5/#6: đang giữ Counter Stance / vận Violet Arc -> không nhận Normal Attack.
+                if (window.isHeldSkillActive && window.isHeldSkillActive()) return;
                 player.isAttackHeld = true;
                 const canStartChargeFromIdle = (player.attackState === 'idle');
                 const canStartChargeFromComboWindow = fromHeldDelay && (player.attackState === 'recovery' || player.attackState === 'comboGrace');
@@ -1226,6 +1473,57 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
             }
             window.handleAttackUp = handleAttackUp;
 
+            // Alpha M1 (BUG-08): HUỶ (không thực thi) mọi thao tác chiến đấu đang được GIỮ — gọi khi cửa sổ mất
+            // focus / tab bị ẩn (07-input-handlers.js) và khi mở Paimon Menu (togglePauseMenu, ui.js), vì lúc đó
+            // sự kiện thả nút (mouseup/keyup/touchend) không tới gameplay. Trước M1 chỉ phím di chuyển được xoá:
+            // giữ Attack rồi Alt-Tab/Esc -> charge vẫn chạy và tự ra Charged Attack, Aim Mode/Held Skill kẹt tới
+            // khi hết giờ rồi tự bắn.
+            //   - Attack đang giữ / đang charge   -> nhả + về idle, KHÔNG ra Normal/Charged Attack.
+            //   - Aim Mode (#1 giữ E, #2 cung Charged Attack, #2 đặt Decoy) hoặc đang 'holding' Skill
+            //                                     -> thoát Aim, KHÔNG bắn/đặt, KHÔNG vào cooldown (cùng cách
+            //                                        enterDeadState() huỷ Aim), gỡ mũi tên preview của cung.
+            //   - Held Skill #5/#6 (Counter Stance / Violet Arc) -> cancelHeldSkill() (đường huỷ có sẵn khi đổi
+            //                                        nhân vật/gục: không damage, không cooldown).
+            // Đòn đã THỰC SỰ ra (windup/active/recovery, Charged Attack đang chạy) giữ nguyên, không bị cắt.
+            function cancelHeldCombatInput(reason) {
+                player.isAttackHeld = false;
+                player.heldThroughComboTimer = 0;
+                if (player.attackState === 'charging') {
+                    player.attackState = 'idle';
+                    player.chargeTimer = 0;
+                    player.chargeReady = false;
+                }
+                if (window.isHeldSkillActive && window.isHeldSkillActive() && window.cancelHeldSkill) {
+                    window.cancelHeldSkill(reason || 'focus_lost');
+                }
+                cancelAimModeInput(reason);
+            }
+            window.cancelHeldCombatInput = cancelHeldCombatInput;
+
+            // Alpha M7 (KI-111 / BUG-16): phần "huỷ Aim Mode" của cancelHeldCombatInput() tách thành hàm riêng (khối lệnh giữ
+            // nguyên) để dùng thêm khi ĐỔI NHÂN VẬT (performCharacterSwap, file 02): thiết kế đã chốt ở M1 — đổi người khi
+            // đang ngắm = HUỶ, không bắn / không đặt Decoy / không cooldown. Trước đây trạng thái ngắm của #2 đi theo sang
+            // nhân vật mới và lúc thả nút thì bắn 1 mũi tên tính cho nhân vật MỚI. Không đụng tới ý định giữ nút Attack
+            // (isAttackHeld) — quy tắc giữ Attack qua lần đổi giữ nguyên. Trả về true nếu thực sự có Aim/holding bị huỷ.
+            function cancelAimModeInput(reason) {
+                if (skillAimState.phase !== 'aiming' && skillAimState.phase !== 'holding') return false;
+                const aimKind = (player.isBowChargedAiming || player.isDecoyPlacing) ? 'bow' : 'skill';
+                if (player.isBowChargedAiming) {
+                    clearBowArrowPreview();
+                    player.isBowChargedAiming = false;
+                    player.bowAimChargeTimer = 0;
+                    player.overwatchActiveForThisCharge = false;
+                }
+                player.isDecoyPlacing = false;
+                skillAimState.phase = 'idle';
+                skillAimState.heldTime = 0;
+                skillAimState.aimTimer = 0;
+                skillAimState.fireTimer = 0;
+                if (window.setSkillAimUIVisible) window.setSkillAimUIVisible(false, aimKind);
+                return true;
+            }
+            window.cancelAimModeInput = cancelAimModeInput;
+
             // triggerChargedAttack(): thi triển Charged Attack. KHÔNG đụng comboIndex/hasHitList của
             // Normal Attack — dùng player.chargedHasHitList RIÊNG (reset ở đây, mỗi lần trigger, kể
             // cả lần trigger do buffer nối tiếp).
@@ -1259,6 +1557,7 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
                 // lúc đang giữ nút — không có bất kỳ chỗ nào khác trong toàn bộ Charged Attack trừ
                 // Stamina liên tục theo dt, chỉ đúng 1 lần tại đây mỗi lần kích hoạt thành công).
                 player.stamina = Math.max(STAMINA_CONFIG.MIN_STAMINA, player.stamina - staminaCost);
+                player.chargedAttackTargetPoint = null; // Character #6: điểm AoE tại mục tiêu chốt lại cho lần CA mới
 
                 player.attackState = 'chargedWindup';
                 // Multi-Animation v2: attackTimer giờ = TỔNG duration của TẤT CẢ animation segment
@@ -1356,7 +1655,7 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
                     const nextIndex = player.comboIndex === 0 ? 1 : player.comboIndex + 1;
                     player.comboIndex = ((nextIndex - 1) % attackList.length) + 1; // xoay vòng 1-based
                 } else {
-                    // Nhân vật chưa có animation.attack nào (VD test_character_anemo) — comboIndex
+                    // Nhân vật chưa có animation.attack nào (VD nhân vật thiếu data) — comboIndex
                     // giữ ý nghĩa "đang trong 1 đòn" để logic reset ở updateCombat() vẫn nhất quán,
                     // nhưng không có data để tra (currentAttackAnim() trả về null, mọi nơi đọc đã
                     // có fallback an toàn từ trước).
@@ -1386,11 +1685,14 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
                 // không giữ lại lịch sử enemy đã trúng hit nào ở đòn TRƯỚC.
                 player.polearmHitsTriggered = getPolearmHitsForCombo(player.comboIndex, !!player.isBurstStateActive).map(() => false);
                 player.polearmHasHitList = [];
+                // Character #4 — hit registration riêng của kiếm dạng hits[] (reset mỗi đòn mới).
+                player.swordHitsTriggered = isBladeWeaponCategory(getActiveWeaponCategory()) ? getPolearmHitsForCombo(player.comboIndex, false).map(() => false) : [];
+                player.swordHasHitList = [];
                 player.mesh.scale.set(1.18, 0.82, 1.18);
 
                 // Alpha v1.0 — Attack Animation: pose windup của Sword đọc từ
                 // visualConfig.animation.attack[comboIndex-1].sword.windupRotation (data-driven,
-                // combo-aware). AN TOÀN nếu nhân vật chưa có config này (VD test_character_anemo):
+                // combo-aware). AN TOÀN nếu nhân vật chưa có config này (VD nhân vật thiếu data):
                 // fallback về đúng giá trị hard-code cũ, KHÔNG đổi hành vi nếu thiếu data.
                 {
                     const attackAnim = attackList[player.comboIndex - 1];
@@ -1416,7 +1718,8 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
                 // "hướng bắn arrow" (cần đầy đủ 3D, xử lý riêng trong applyBowArrowSpawnTick() qua
                 // TargetAssist.getAimDirection(), xem combat.js). Melee (Sword) GIỮ NGUYÊN 100% —
                 // chỉ dùng findSoftTargetingRotation()/SOFT_TARGETING_CONFIG mặc định như trước.
-                const isBow = getActiveWeaponType() === 'bow';
+                // Character #6: Catalyst dùng CÙNG hỗ trợ ngắm tầm xa của Bow (TargetAssist 3D, không homing).
+                const isBow = isProjectileWeaponCategory(getActiveWeaponCategory());
                 const softTarget = findSoftTargetingRotation(player.position, player.mesh.rotation.y, isBow ? SOFT_TARGETING_CONFIG : null);
                 if (softTarget) {
                     player.softTargetLockY = softTarget.targetY;
@@ -1470,7 +1773,7 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
             // Combo Attack System v2 — Timing per-đòn: trả về {windup, active, recovery} (giây)
             // CỦA ĐÚNG ĐÒN đang chạy (qua getCurrentAttackAnim()). FALLBACK về COMBAT_TIMING toàn
             // cục (02-collision-and-stats-core.js, GIỮ NGUYÊN không đổi) nếu đòn không tự định
-            // nghĩa timing riêng — an toàn cho nhân vật/đòn thiếu data (VD test_character_anemo).
+            // nghĩa timing riêng — an toàn cho nhân vật/đòn thiếu data (VD nhân vật thiếu data).
             // TẤT CẢ nơi đọc windup/active/recovery duration (combat.js, 08-physics-combat-camera-
             // loop.js, ATTACK_LUNGE_CONFIG) PHẢI dùng hàm này thay vì đọc COMBAT_TIMING trực tiếp.
             function getCurrentAttackTiming() {
@@ -1501,6 +1804,19 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
                     typeof character.talents.decoyConfig.cooldown === 'number') {
                     cooldownDuration = character.talents.decoyConfig.cooldown;
                 }
+                // BUGFIX (Character #3 — Polearm Coordinated Attack): polearm_electro_reactive.cooldown
+                // (SKILL_LIBRARY, file 11) CỐ Ý để null với comment "đọc THẬT từ
+                // character.talents.reactiveConfig.cooldown" (roster, file 10) — ĐÚNG PATTERN
+                // decoyConfig.cooldown ở trên, nhưng nhánh fallback đó CHỈ kiểm tra decoyConfig, không
+                // bao giờ kiểm tra reactiveConfig. Hệ quả đã xác nhận qua test thực tế: cooldownDuration
+                // rơi qua `return cooldownDuration || 0` -> LUÔN trả về 0 cho Character #3 -> Elemental
+                // Skill của polearm_test hoàn toàn KHÔNG có cooldown (bắn liên tục không giới hạn) thay
+                // vì đúng 10s như roster khai báo. Thêm nhánh reactiveConfig, cùng pattern decoyConfig.
+                if ((cooldownDuration === null || cooldownDuration === undefined) &&
+                    character && character.talents && character.talents.reactiveConfig &&
+                    typeof character.talents.reactiveConfig.cooldown === 'number') {
+                    cooldownDuration = character.talents.reactiveConfig.cooldown;
+                }
                 return cooldownDuration || 0;
             }
 
@@ -1521,10 +1837,15 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
             // KHÔNG có cooldown. Sửa: dùng getActiveSkillCooldownDuration() (dispatch ĐÚNG NHƯ comment
             // ở file 11 mô tả), KHÔNG đổi hành vi cho skill khác (hydro_pressure_shot vẫn đọc
             // skillData.cooldown như cũ, vì decoyConfig không tồn tại trên nhân vật đó).
-            function startSkillCooldown() {
+            function startSkillCooldown(overrideSeconds) {
                 const character = getActiveCharacterData();
-                partyState[activeCharacterIndex].skillCooldownTimer = getActiveSkillCooldownDuration(character);
+                // overrideSeconds (Character #6: Tap/Hold có cooldown khác nhau). skillCooldownTotal = tổng để UI
+                // tính % đúng với lần cast này.
+                const duration = (typeof overrideSeconds === 'number') ? overrideSeconds : getActiveSkillCooldownDuration(character);
+                partyState[activeCharacterIndex].skillCooldownTimer = duration;
+                partyState[activeCharacterIndex].skillCooldownTotal = duration;
             }
+            window.startSkillCooldown = startSkillCooldown;
 
             // Kiểm tra điều kiện tiên quyết chung để dùng Elemental Skill (giữ nguyên hành vi cũ).
             function canUseElementalSkill() {
@@ -1532,8 +1853,9 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
                 const activeMember = partyState[activeCharacterIndex];
                 if (activeMember.skillCooldownTimer > 0 || skillAimState.phase !== 'idle') return false;
                 if (burstAimState.phase !== 'idle') return false;
+                if (window.isHeldSkillActive && window.isHeldSkillActive()) return false;
                 // Character #2 Validation — BUG FIX: TRƯỚC ĐÂY hàm này KHÔNG kiểm tra character.skillId
-                // tồn tại — nhân vật chưa có skill (VD test_character_anemo, skillId: null) vẫn qua
+                // tồn tại — nhân vật chưa có skill (skillId: null) vẫn qua
                 // được điều kiện này, khiến handleSkillKeyDown()/updateSkillAim() chạy tiếp: phát SFX
                 // (handleSkillKeyUp phát sfx.playSwing() TRƯỚC KHI executeCharacterSkill() tự no-op vì
                 // SKILL_LIBRARY[null] undefined), và Hold vẫn vào được aim mode dù không có gì để bắn.
@@ -1560,6 +1882,17 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
             // handleSkillKeyUp() hoặc khi updateSkillAim() phát hiện đã vượt ngưỡng holdThreshold.
             function handleSkillKeyDown() {
                 if (!canUseElementalSkill()) return; // canUseElementalSkill() đã tự chặn nếu phase !== 'idle'
+                // Character #5/#6 — Skill kiểu GIỮ (inputMode 'held': Counter Stance / Violet Arc): bắt đầu NGAY
+                // lúc nhấn, KHÔNG đi qua 'holding' -> Aim Mode/crosshair. Kết thúc ở handleSkillKeyUp() hoặc tự
+                // hết giờ (09-character-system.js, HELD SKILL CONTROLLER).
+                {
+                    const heldChar = getActiveCharacterData();
+                    const heldData = heldChar ? SKILL_LIBRARY[heldChar.skillId] : null;
+                    if (heldData && heldData.inputMode === 'held' && window.beginHeldSkill) {
+                        if (window.beginHeldSkill(heldChar, heldData)) pulseSkillButton();
+                        return;
+                    }
+                }
                 // Elemental Skill Validation — set isDecoyPlacing TRƯỚC khi vào 'holding', vì
                 // updateSkillAim() có thể tự chuyển 'holding' -> 'aiming' (startSkillAim()) NGAY frame
                 // kế tiếp nếu holdThreshold = 0 (đúng cấu hình archer_decoy_bomb, xem file 11) — cờ
@@ -1574,6 +1907,7 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
             // đây là Tap, bắn Pressure Shot ngay theo hướng nhân vật đang nhìn. Nếu đang ở phase 'aiming'
             // -> người chơi chủ động thả phím sớm, kết thúc Aim State bằng Pressure Shot theo crosshair.
             function handleSkillKeyUp() {
+                if (window.isHeldSkillActive && window.isHeldSkillActive()) { window.releaseHeldSkill('release'); return; }
                 if (skillAimState.phase === 'aiming') {
                     endSkillAim();
                 } else if (skillAimState.phase === 'holding') {
@@ -2391,11 +2725,23 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
                 const mOverlay = document.getElementById('mobile-cooldown-overlay'), mText = document.getElementById('mobile-cooldown-text');
                 const dOverlay = document.getElementById('desktop-cooldown-overlay'), dText = document.getElementById('desktop-cooldown-text'), dRadial = document.getElementById('desktop-cooldown-radial');
 
+                // BUGFIX (cooldown dừng khi off-field): skillCooldownTimer đã là per-character
+                // (partyState[i].skillCooldownTimer — không đi theo `player`, không bị copy qua lại khi
+                // switch), nhưng TRƯỚC ĐÂY vòng đếm ngược dưới đây CHỈ trừ dt cho nhân vật ĐANG ACTIVE ->
+                // nhân vật vừa rời sân bị "đóng băng" cooldown tới khi được switch lại. Đây là điểm đếm
+                // ngược DUY NHẤT của skillCooldownTimer trong toàn dự án (file 08 đã xóa bản trùng lặp —
+                // xem comment tại chỗ gọi), nên giờ trừ dt cho MỌI thành viên party ĐÚNG 1 LẦN/frame
+                // tại đây: không có timer thứ 2, không đếm đôi. Phần UI bên dưới vẫn chỉ hiển thị cooldown
+                // của nhân vật đang active (switch về là thấy ngay thời gian còn lại đúng).
+                for (let i = 0; i < partyState.length; i++) {
+                    const member = partyState[i];
+                    if (!member || !(member.skillCooldownTimer > 0)) continue;
+                    member.skillCooldownTimer = Math.max(0, member.skillCooldownTimer - dt);
+                }
+
                 const activeMember = partyState[activeCharacterIndex];
 
                 if (activeMember.skillCooldownTimer > 0) {
-                    activeMember.skillCooldownTimer -= dt;
-                    if (activeMember.skillCooldownTimer < 0) activeMember.skillCooldownTimer = 0;
                     const displaySec = Math.ceil(activeMember.skillCooldownTimer);
                     // Alpha v1.0 — Character System: progress (thanh UI) chia cho cooldown CỦA SKILL
                     // NHÂN VẬT ĐANG ACTIVE (đọc từ SKILL_LIBRARY qua getActiveCharacterData()), không
@@ -2410,22 +2756,24 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
                     // đúng số giây. Cùng nguồn dispatch với startSkillCooldown() — sửa 1 chỗ, cả 2 nơi
                     // luôn nhất quán.
                     const character = getActiveCharacterData();
-                    const cooldownDuration = getActiveSkillCooldownDuration(character) || 1;
+                    const cooldownDuration = (activeMember.skillCooldownTotal > 0 ? activeMember.skillCooldownTotal : getActiveSkillCooldownDuration(character)) || 1;
                     const progress = activeMember.skillCooldownTimer / cooldownDuration;
 
-                    if (mOverlay && mText) { mOverlay.classList.remove('hidden'); mText.textContent = displaySec; }
+                    // Alpha M7 (TD-22): phần hiển thị chỉ ghi DOM khi giá trị đổi (hudToggle/hudText/hudStyle — ui.js);
+                    // bộ đếm cooldown phía trên giữ nguyên.
+                    if (mOverlay && mText) { hudToggle(mOverlay, 'hidden', false); hudText(mText, displaySec); }
                     if (dOverlay && dText) {
-                        dOverlay.classList.remove('hidden'); dText.textContent = displaySec;
+                        hudToggle(dOverlay, 'hidden', false); hudText(dText, displaySec);
                         if (dRadial) {
                             const sweepDeg = (progress * 360).toFixed(1);
-                            dRadial.style.opacity = '1'; dRadial.style.background = `conic-gradient(transparent ${(360 - sweepDeg)}deg, rgba(34,211,238,0.45) ${(360 - sweepDeg)}deg)`;
-                            dRadial.style.border = 'none'; dRadial.style.borderRadius = '12px';
+                            hudStyle(dRadial, 'opacity', '1'); hudStyle(dRadial, 'background', `conic-gradient(transparent ${(360 - sweepDeg)}deg, rgba(34,211,238,0.45) ${(360 - sweepDeg)}deg)`);
+                            hudStyle(dRadial, 'border', 'none'); hudStyle(dRadial, 'borderRadius', '12px');
                         }
                     }
                 } else {
-                    if (mOverlay) mOverlay.classList.add('hidden');
-                    if (dOverlay) dOverlay.classList.add('hidden');
-                    if (dRadial) { dRadial.style.opacity = '0'; dRadial.style.background = ''; }
+                    if (mOverlay) hudToggle(mOverlay, 'hidden', true);
+                    if (dOverlay) hudToggle(dOverlay, 'hidden', true);
+                    if (dRadial) { hudStyle(dRadial, 'opacity', '0'); hudStyle(dRadial, 'background', ''); }
                 }
             }
             window.updateSkillCooldown = updateSkillCooldown;
@@ -2443,12 +2791,24 @@ window.applyPolearmNormalAttackHitsTick = applyPolearmNormalAttackHitsTick;
             // khóa hành động khác, chưa có bubble nào đang hoạt động, chưa đang trong Aim State khác).
             function canUseBurst() {
                 if (!player.isGrounded || player.isClimbing || player.isSwimming || player.isDrowning) return false;
+                if (window.isHeldSkillActive && window.isHeldSkillActive()) return false;
                 if (player.energy < player.maxEnergy) return false;
                 // Alpha v1.0 — Character System: player.isBursting (đã xóa khỏi player, xem file 02)
                 // thay bằng kiểm tra player.activeEffects.burst.length > 0 — tương đương "đang có ít
                 // nhất 1 Burst effect (Water Bubble) còn sống". HÀNH VI GIỮ NGUYÊN: chỉ cho phép 1
                 // Water Bubble tồn tại cùng lúc, y hệt cờ isBursting cũ.
-                if (player.activeEffects.burst.length > 0) return false;
+                // BUGFIX (Burst khóa chéo giữa nhân vật): trước đây chặn khi CÓ BẤT KỲ Burst effect nào
+                // còn sống -> Burst của nhân vật A đang chạy (VD field của #4, zone của #2) khiến nhân vật
+                // B đổi vào không Burst được. Mọi Burst effect đều lưu người thi triển ở custom.character
+                // (damage tính theo snapshot đó, độc lập với nhân vật active) -> chỉ chặn khi Burst của
+                // CHÍNH nhân vật đang active còn sống (giữ quy tắc cũ: 1 nhân vật không chồng 2 Burst).
+                const activeCharForBurst = getActiveCharacterData();
+                const ownBurstAlive = player.activeEffects.burst.some(function (fx) {
+                    const owner = (fx.custom && fx.custom.character) || fx.character;
+                    // effect không rõ chủ (không nên xảy ra) -> giữ hành vi cũ: chặn cho an toàn
+                    return !owner || !activeCharForBurst || owner.id === activeCharForBurst.id;
+                });
+                if (ownBurstAlive) return false;
                 if (burstAimState.phase !== 'idle') return false;
                 if (skillAimState.phase !== 'idle') return false;
                 // Character #2 Validation — BUG FIX: cùng loại bug với canUseElementalSkill() — thiếu
